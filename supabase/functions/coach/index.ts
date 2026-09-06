@@ -340,10 +340,12 @@ export async function handle(req: Request): Promise<Response> {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.7,
-          /* Holgado a propósito: los modelos 3.x gastan tokens razonando
-             antes de escribir, y con un tope corto se quedaban sin margen
-             para la respuesta en sí. */
-          maxOutputTokens: 1200,
+          /* Muy holgado a propósito. gemini-3.6-flash razona antes de
+             escribir y ese razonamiento sale del MISMO presupuesto que la
+             respuesta. Con 1200 la respuesta llegaba cortada a mitad de
+             frase (finishReason MAX_TOKENS) y el JSON quedaba sin cerrar.
+             La respuesta útil son ~200 tokens; el resto es para pensar. */
+          maxOutputTokens: 4096,
           responseMimeType: "application/json",
           responseSchema: {
             type: "OBJECT",
@@ -367,15 +369,24 @@ export async function handle(req: Request): Promise<Response> {
   }
 
   let out: Advice | null = null;
+  let cortada = false;
   try {
-    out = parseModelJson(extractText(JSON.parse(text)));
+    const data = JSON.parse(text);
+    cortada = data?.candidates?.[0]?.finishReason === "MAX_TOKENS";
+    out = parseModelJson(extractText(data));
   } catch {
     out = null;
   }
 
   if (!out) {
-    console.error("respuesta ininteligible", text.slice(0, 500));
-    return json({ error: "La IA respondió algo que no se pudo leer." }, 502);
+    console.error("respuesta ininteligible", res.status, text.slice(0, 800));
+    /* Vale la pena distinguirlo: si vuelve a pasar, el mensaje ya dice qué
+       tocar (maxOutputTokens) en vez de mandar a mirar logs. */
+    return json({
+      error: cortada
+        ? "La IA se quedó sin espacio para responder. Hay que subir maxOutputTokens en la función."
+        : "La IA respondió algo que no se pudo leer.",
+    }, 502);
   }
 
   return json({

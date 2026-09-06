@@ -119,6 +119,42 @@ Deno.test("si la red falla no se rompe", async () =>
     assert((await res.json()).error.includes("No se pudo contactar"));
   }));
 
+/* Pasó de verdad con gemini-3.6-flash: el modelo gasta el presupuesto
+   razonando y devuelve 200 con el JSON cortado a mitad de frase. */
+Deno.test("una respuesta cortada por falta de tokens se explica sola", async () =>
+  await conClave(async () => {
+    mockGemini(200, {
+      candidates: [{
+        finishReason: "MAX_TOKENS",
+        content: {
+          parts: [{
+            text: '{"recomendacion":"Venís bien con Empuje, pero hace 16 días que no',
+            thoughtSignature: "EsEfCr4fARFNMg8...",
+          }],
+        },
+      }],
+    });
+    const res = await handle(post({ workouts: SESIONES }));
+    assertEquals(res.status, 502);
+    assert(
+      (await res.json()).error.includes("maxOutputTokens"),
+      "el mensaje tiene que decir qué tocar",
+    );
+  }));
+
+Deno.test("pide margen de sobra para que el modelo pueda razonar", async () =>
+  await conClave(async () => {
+    let enviado = "";
+    globalThis.fetch = ((_u: unknown, init: RequestInit) => {
+      enviado = String(init.body);
+      return Promise.resolve(new Response(JSON.stringify(geminiOk("a", "b")), { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    await handle(post({ workouts: SESIONES }));
+    const tope = JSON.parse(enviado).generationConfig.maxOutputTokens;
+    assert(tope >= 4000, `maxOutputTokens quedó corto: ${tope}`);
+  }));
+
 Deno.test("respuesta ininteligible del modelo no rompe", async () =>
   await conClave(async () => {
     mockGemini(200, { candidates: [{ content: { parts: [{ text: "puro texto" }] } }] });
