@@ -667,27 +667,23 @@
   }
 
   /* --------------------------------------------------- pantalla de acceso
-     Un solo formulario: email y contraseña. La pestaña de arriba decide si se
-     entra a una cuenta que ya existe o se crea una nueva. */
+     Lo mínimo: email, contraseña, un botón. Un enlace abajo cambia entre crear
+     cuenta y entrar a una que ya existe. */
   function renderAuth(mode, email) {
     if (email !== undefined) authEmail = email;
     if (mode) authMode = mode === 'signup' ? 'signup' : 'signin';
     var signup = authMode === 'signup';
 
-    document.getElementById('app').innerHTML =
+    var app = document.getElementById('app');
+    /* .app es flex (columna en móvil, fila en escritorio). En fila, un hijo sin
+       ancho se encoge al contenido y la tarjeta queda pegada a la izquierda.
+       Con esta clase, #app pasa a ser un bloque normal y el centrado depende
+       solo de .authpage. */
+    app.className = 'app is-auth';
+
+    app.innerHTML =
       '<div class="authpage"><div class="authcard">' +
       '<div class="brand">' + icon('barbell') + '<b>GymLog</b></div>' +
-
-      '<div class="segmented authtabs">' +
-      '<button type="button" data-act="auth-mode" data-mode="signin"' +
-      (signup ? '' : ' class="is-active"') + '>Iniciar sesión</button>' +
-      '<button type="button" data-act="auth-mode" data-mode="signup"' +
-      (signup ? ' class="is-active"' : '') + '>Crear cuenta</button>' +
-      '</div>' +
-
-      '<p class="muted">' + (signup
-        ? 'Elegí un email y una contraseña. Se crea al instante, sin correos de confirmación.'
-        : 'Entrá con el email y la contraseña de tu cuenta.') + '</p>' +
 
       '<div class="field"><label for="au-email">Email</label>' +
       '<input class="input" type="email" id="au-email" autocomplete="email" ' +
@@ -698,18 +694,15 @@
       'autocomplete="' + (signup ? 'new-password' : 'current-password') + '" ' +
       'placeholder="' + (signup ? 'Mínimo 6 caracteres' : '••••••••') + '"></div>' +
 
-      (signup
-        ? '<div class="field"><label for="au-pass2">Repetir contraseña</label>' +
-        '<input class="input" type="password" id="au-pass2" autocomplete="new-password" ' +
-        'placeholder="••••••••"></div>'
-        : '') +
-
       '<p class="autherror" id="au-error" role="alert" hidden></p>' +
 
       '<button class="btn primary block" data-act="auth-submit">' +
       (signup ? 'Crear cuenta' : 'Entrar') + '</button>' +
 
-      '<p class="authfoot">Los datos que ya tenés en este dispositivo se suben a la cuenta la primera vez que entrás.</p>' +
+      '<p class="authswap">' + (signup ? '¿Ya tenés cuenta? ' : '¿No tenés cuenta? ') +
+      '<button type="button" data-act="auth-mode" data-mode="' + (signup ? 'signin' : 'signup') + '">' +
+      (signup ? 'Iniciar sesión' : 'Crear una') + '</button></p>' +
+
       '</div></div>' +
       /* U.toast() escribe en #toasts, que lo crea buildShell(). Acá todavía no
          existe, así que los errores van en línea dentro de la tarjeta. */
@@ -965,10 +958,14 @@
         break;
       case 'cloud-sync': cloudSync(); break;
 
-      case 'auth-mode':
-        // conserva lo escrito al cambiar de pestaña
+      case 'auth-mode': {
+        // conserva lo ya escrito al cambiar entre crear cuenta e iniciar sesión
+        var keepPass = (document.getElementById('au-pass') || {}).value || '';
         renderAuth(arg('mode'), (document.getElementById('au-email') || {}).value || '');
+        var passEl = document.getElementById('au-pass');
+        if (passEl) passEl.value = keepPass;
         break;
+      }
 
       case 'auth-submit': {
         var signup = authMode === 'signup';
@@ -978,9 +975,6 @@
         authError('');
         if (!/^\S+@\S+\.\S+$/.test(emailVal)) { authError('Escribí un email válido.'); break; }
         if (passVal.length < 6) { authError('La contraseña necesita al menos 6 caracteres.'); break; }
-        if (signup && passVal !== document.getElementById('au-pass2').value) {
-          authError('Las contraseñas no coinciden.'); break;
-        }
 
         authEmail = emailVal;
         var label = t.textContent;
@@ -1106,7 +1100,9 @@
         icon(v.icon) + '<span>' + v.label + '</span></button>';
     }).join('');
 
-    document.getElementById('app').innerHTML =
+    var app = document.getElementById('app');
+    app.className = 'app';   // quita is-auth que deja la pantalla de acceso
+    app.innerHTML =
       '<nav class="sidenav">' +
       '<div class="brand"><span class="mark-logo">' + icon('barbell') + '</span><b>GymLog</b></div>' + tabs +
       '<span class="grow"></span>' +

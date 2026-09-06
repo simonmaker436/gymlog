@@ -1437,17 +1437,34 @@ button.row:hover { background: var(--surface-2); }
 @keyframes logo-breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .6; transform: scale(.94); } }
 
 /* ============================================================== AUTH ==== */
+
+/* #app normalmente es flex: columna en móvil y FILA a partir de 900px (para la
+   barra lateral). En fila, un hijo sin ancho se encoge al contenido y la
+   tarjeta queda pegada a la izquierda: ese era el bug. Mientras se muestra el
+   acceso, #app vuelve a ser un bloque común y el centrado queda solo en manos
+   de .authpage. */
+.app.is-auth {
+  display: block;
+  width: 100%;
+}
+
 .authpage {
-  min-height: 100dvh;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  flex: 1;                    /* por si algún día vuelve a colgar de un flex */
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
 }
 .authcard {
+  box-sizing: border-box;
   width: 100%;
   max-width: 360px;
+  margin: 0 auto;             /* centrado también si .authpage no fuera flex */
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1477,9 +1494,22 @@ button.row:hover { background: var(--surface-2); }
 }
 .authcard .field { margin-bottom: 16px; }
 
-/* --------------- pestañas: entrar a una cuenta o crear una nueva */
-.authtabs { margin-bottom: 18px; }
-.authtabs button { padding: 11px 12px; }
+/* --------------- cambiar entre crear cuenta e iniciar sesión */
+.authswap {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.authswap button {
+  font-family: var(--font-cond);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.authswap button:hover { text-decoration: underline; }
 
 /* --------------- error dentro de la tarjeta, no como toast pasajero */
 .autherror {
@@ -1495,12 +1525,3 @@ button.row:hover { background: var(--surface-2); }
 }
 .autherror[hidden] { display: none; }
 
-.authcard .authfoot {
-  margin: 20px 0 0;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  text-align: center;
-}

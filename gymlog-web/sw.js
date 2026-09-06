@@ -4,7 +4,7 @@
      1. VERSION acá abajo
      2. el ?v= de los <script>/<link> en index.html
    Si solo se sube una, el navegador puede quedarse con la mezcla vieja. */
-var VERSION = '6';
+var VERSION = '7';
 var CACHE = 'gymlog-v' + VERSION;
 
 var ASSETS = [

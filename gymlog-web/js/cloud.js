@@ -32,6 +32,19 @@
     return msg;
   }
 
+  /* Supabase intenta mandar el correo de confirmación y, si el SMTP falla o se
+     pasa del límite, devuelve «Error sending confirmation email». Ojo: para
+     entonces el usuario a veces YA quedó creado. */
+  function isEmailSendFailure(err) {
+    return /error sending (?:confirmation|signup) (?:email|mail)/i.test((err && err.message) || '') ||
+      /smtp|send.*email|email.*send/i.test((err && err.message) || '');
+  }
+
+  var CONFIRM_EMAIL_HINT =
+    'Supabase está intentando mandar un correo de confirmación y no puede. ' +
+    'Hay que desactivar «Confirm email» en el panel de Supabase ' +
+    '(Authentication → Sign In / Providers → Email).';
+
   function session() {
     var c = sb();
     if (!c) return Promise.resolve(null);
@@ -49,18 +62,37 @@
   }
 
   /* Con «Confirm email» desactivado en Supabase, signUp devuelve la sesión ya
-     iniciada y no manda ningún correo. Si alguien vuelve a activar esa opción,
-     signUp responde sin sesión: ahí sí hay que ir al email, y lo decimos. */
+     iniciada y no manda ningún correo: ese es el camino feliz.
+
+     Si esa opción sigue activada, hay dos finales malos y los dos se salvan
+     igual: probando iniciar sesión con lo que se acaba de registrar. Si la
+     cuenta quedó creada (pasa incluso cuando el envío del correo falla), el
+     login entra y la persona sigue adelante sin enterarse de nada. Solo si
+     tampoco eso funciona se muestra el error, ya explicado. */
   function signUp(email, password) {
     var c = sb();
     if (!c) return Promise.reject(new Error('No hay conexión con la nube ahora mismo.'));
+
+    function rescue(originalMsg) {
+      return signIn(email, password)['catch'](function () {
+        throw new Error(originalMsg);
+      });
+    }
+
     return c.auth.signUp({ email: email, password: password })
       .then(function (r) {
-        if (r.error) throw new Error(friendlyError(r.error));
-        if (!r.data.session) {
-          throw new Error('Falta confirmar el email antes de entrar. Revisá tu correo.');
+        if (r.error) {
+          if (isEmailSendFailure(r.error)) return rescue(CONFIRM_EMAIL_HINT);
+          throw new Error(friendlyError(r.error));
         }
+        // sin sesión = «Confirm email» activado, pero el usuario ya existe
+        if (!r.data.session) return rescue(CONFIRM_EMAIL_HINT);
         return r.data.session;
+      })
+      ['catch'](function (err) {
+        // algunos fallos de SMTP llegan como excepción, no como r.error
+        if (isEmailSendFailure(err)) return rescue(CONFIRM_EMAIL_HINT);
+        throw err;
       });
   }
 
