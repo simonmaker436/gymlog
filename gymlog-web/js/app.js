@@ -28,6 +28,7 @@
 
   var bootTheme = null;
   var backupCount = 0;
+  var cloudUser = null; // { email, id } o null si no hay sesión
 
   /* ------------------------------------------------------------ contexto */
   function ctx() {
@@ -51,7 +52,11 @@
       eff: S.effectiveStart(settings.startDate, workouts),
       hasDemo: store.hasDemo(),
       backupAge: age,
-      backupCount: backupCount
+      backupCount: backupCount,
+      cloud: cloudUser,
+      syncAge: settings.lastSync
+        ? Math.max(0, Math.floor((Date.now() - new Date(settings.lastSync).getTime()) / 86400000))
+        : null
     };
   }
 
@@ -695,6 +700,205 @@
     return store.listBackups().then(function (rows) { backupCount = rows.length; return rows; });
   }
 
+  /* ------------------------------------------------------- nube (Supabase) */
+  function refreshCloudSession() {
+    if (!GL.cloud || !GL.cloud.ready()) { cloudUser = null; return Promise.resolve(null); }
+    return GL.cloud.session().then(function (sess) {
+      cloudUser = sess ? { email: sess.user.email, id: sess.user.id } : null;
+      return cloudUser;
+    })['catch'](function () { cloudUser = null; return null; });
+  }
+
+  function openCloudVerify(email) {
+    U.openSheet({
+      title: 'Ingresá el código',
+      body: '<p class="muted" style="margin:0 0 12px;font-size:13px">Te mandamos un código de 6 dígitos a <b>' +
+        esc(email) + '</b>. Puede tardar un minuto.</p>' +
+        '<div class="field"><label for="cl-code">Código</label>' +
+        '<input class="input" id="cl-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></div>' +
+        '<button class="btn ghost" id="cl-resend" type="button" style="margin-top:4px">Reenviar código</button>',
+      footer: '<button class="btn primary block" id="cl-verify">Verificar</button>',
+      onMount: function (sheet) {
+        sheet.querySelector('#cl-code').focus();
+        sheet.querySelector('#cl-verify').addEventListener('click', function () {
+          var code = sheet.querySelector('#cl-code').value.trim();
+          if (!/^\d{6}$/.test(code)) { U.toast('El código son 6 números', 'error'); return; }
+          var btn = sheet.querySelector('#cl-verify');
+          btn.disabled = true; btn.textContent = 'Verificando…';
+          GL.cloud.verifyCode(email, code).then(function () {
+            return refreshCloudSession();
+          }).then(function () {
+            U.closeSheet();
+            render();
+            U.toast('Sesión iniciada', 'ok');
+            maybeOfferRestore();
+          })['catch'](function (err) {
+            btn.disabled = false; btn.textContent = 'Verificar';
+            U.toast(err.message || 'Código incorrecto', 'error');
+          });
+        });
+        sheet.querySelector('#cl-resend').addEventListener('click', function () {
+          GL.cloud.sendCode(email).then(function () { U.toast('Código reenviado', 'ok'); })
+            ['catch'](function (err) { U.toast(err.message || 'No se pudo reenviar', 'error'); });
+        });
+      }
+    });
+  }
+
+  function openCloudLogin() {
+    U.openSheet({
+      title: 'Iniciar sesión',
+      body: '<p class="muted" style="margin:0 0 12px;font-size:13px">Te mandamos un código de 6 dígitos por email. Nada de contraseñas.</p>' +
+        '<div class="field"><label for="cl-email">Email</label>' +
+        '<input class="input" type="email" id="cl-email" autocomplete="email" placeholder="vos@email.com"></div>',
+      footer: '<button class="btn primary block" id="cl-send">Enviar código</button>',
+      onMount: function (sheet) {
+        sheet.querySelector('#cl-email').focus();
+        sheet.querySelector('#cl-send').addEventListener('click', function () {
+          var email = sheet.querySelector('#cl-email').value.trim();
+          if (!/^\S+@\S+\.\S+$/.test(email)) { U.toast('Escribí un email válido', 'error'); return; }
+          var btn = sheet.querySelector('#cl-send');
+          btn.disabled = true; btn.textContent = 'Enviando…';
+          GL.cloud.sendCode(email).then(function () {
+            U.closeSheet();
+            setTimeout(function () { openCloudVerify(email); }, 0);
+          })['catch'](function (err) {
+            btn.disabled = false; btn.textContent = 'Enviar código';
+            U.toast(err.message || 'No se pudo enviar el código', 'error');
+          });
+        });
+      }
+    });
+  }
+
+  function cloudSync() {
+    if (!cloudUser) { U.toast('Iniciá sesión primero', 'error'); return; }
+    U.toast('Sincronizando…');
+    GL.cloud.push(store.exportData()).then(function () {
+      return store.saveSettings({ lastSync: new Date().toISOString() });
+    }).then(function () {
+      render();
+      U.toast('Copia subida a la nube', 'ok');
+    })['catch'](function (err) {
+      U.toast(err.message || 'No se pudo sincronizar', 'error');
+    });
+  }
+
+  /* Si el dispositivo está vacío y hay algo guardado en la nube, se ofrece
+     restaurarlo. Si ya hay datos locales, no se toca nada por las dudas. */
+  function maybeOfferRestore() {
+    if (store.workouts().length) return;
+    GL.cloud.pull().then(function (row) {
+      if (!row || !row.payload) return;
+      return U.confirmDialog({
+        title: 'Copia encontrada en la nube',
+        message: 'Encontramos un respaldo guardado. ¿Restaurarlo en este dispositivo?',
+        confirmLabel: 'Restaurar'
+      }).then(function (ok) {
+        if (!ok) return;
+        return store.importData(row.payload, 'replace').then(function () {
+          state.month = S.monthKey(S.today());
+          applyTheme(store.settings().theme);
+          render();
+          U.toast('Datos restaurados', 'ok');
+        });
+      });
+    })['catch'](function () { });
+  }
+
+  /* ------------------------------------------------------- encuesta inicial */
+  function maybeOpenOnboarding() {
+    if (store.settings().onboarded) return;
+    var s = store.settings();
+    var dows = [{ i: 1, l: 'L' }, { i: 2, l: 'M' }, { i: 3, l: 'X' }, { i: 4, l: 'J' },
+    { i: 5, l: 'V' }, { i: 6, l: 'S' }, { i: 0, l: 'D' }];
+    var days = s.gymDays.slice();
+    var goal = s.bodyGoal || 'ganar-musculo';
+    var units = s.units || 'kg';
+
+    U.openSheet({
+      title: 'Antes de arrancar',
+      body:
+        '<p class="muted" style="margin:0 0 4px;font-size:13px">Unos datos rápidos de perfil. Se pueden cambiar después en Ajustes.</p>' +
+        '<div class="field"><label for="ob-name">Nombre</label>' +
+        '<input class="input" id="ob-name" maxlength="24" autocomplete="off" value="' + esc(s.name || '') + '"></div>' +
+        '<div class="field"><label for="ob-age">Edad</label>' +
+        '<input class="input" type="number" id="ob-age" min="10" max="100" inputmode="numeric"></div>' +
+        '<div class="field"><label for="ob-weight">Peso (<span id="ob-weight-unit">' + esc(units) + '</span>)</label>' +
+        '<input class="input" type="number" id="ob-weight" min="1" step="0.1" inputmode="decimal"></div>' +
+        '<div class="field"><label for="ob-height">Altura (cm)</label>' +
+        '<input class="input" type="number" id="ob-height" min="100" max="250" inputmode="numeric"></div>' +
+        '<div class="field"><label>Objetivo</label><div class="segmented" id="ob-goal" style="height:auto;flex-wrap:wrap">' +
+        GL.store.BODY_GOALS.map(function (g) {
+          return '<button type="button" data-goal="' + g.key + '"' + (goal === g.key ? ' class="is-active"' : '') + '>' + esc(g.label) + '</button>';
+        }).join('') + '</div></div>' +
+        '<div class="field"><label>Días de entreno</label>' +
+        '<div class="daypick" id="ob-days">' + dows.map(function (d) {
+          return '<button type="button" data-day="' + d.i + '"' + (days.indexOf(d.i) >= 0 ? ' class="on"' : '') +
+            ' aria-label="' + S.DAY_NAMES[d.i] + '" aria-pressed="' + (days.indexOf(d.i) >= 0) + '">' + d.l + '</button>';
+        }).join('') + '</div></div>' +
+        '<div class="field"><label>Unidades</label><div class="segmented" id="ob-units">' +
+        '<button type="button" data-units="kg"' + (units === 'kg' ? ' class="is-active"' : '') + '>kg</button>' +
+        '<button type="button" data-units="lb"' + (units === 'lb' ? ' class="is-active"' : '') + '>lb</button>' +
+        '</div></div>',
+      footer: '<button class="btn primary block" id="ob-save">' + icon('check') + 'Guardar y empezar</button>',
+      onClose: function () {
+        // si lo cierra sin guardar, se vuelve a preguntar la próxima vez
+      },
+      onMount: function (sheet) {
+        sheet.querySelector('#ob-goal').addEventListener('click', function (e) {
+          var b = e.target.closest('[data-goal]');
+          if (!b) return;
+          goal = b.getAttribute('data-goal');
+          Array.prototype.forEach.call(sheet.querySelectorAll('#ob-goal button'), function (x) { x.classList.toggle('is-active', x === b); });
+        });
+        sheet.querySelector('#ob-units').addEventListener('click', function (e) {
+          var b = e.target.closest('[data-units]');
+          if (!b) return;
+          units = b.getAttribute('data-units');
+          Array.prototype.forEach.call(sheet.querySelectorAll('#ob-units button'), function (x) { x.classList.toggle('is-active', x === b); });
+          sheet.querySelector('#ob-weight-unit').textContent = units;
+        });
+        sheet.querySelector('#ob-days').addEventListener('click', function (e) {
+          var b = e.target.closest('[data-day]');
+          if (!b) return;
+          var n = Number(b.getAttribute('data-day'));
+          var i = days.indexOf(n);
+          if (i >= 0) days.splice(i, 1); else days.push(n);
+          b.classList.toggle('on');
+          b.setAttribute('aria-pressed', days.indexOf(n) >= 0);
+        });
+        sheet.querySelector('#ob-save').addEventListener('click', function () {
+          var name = sheet.querySelector('#ob-name').value.trim() || 'Simón';
+          var ageVal = sheet.querySelector('#ob-age').value.trim();
+          var weightVal = sheet.querySelector('#ob-weight').value.trim();
+          var heightVal = sheet.querySelector('#ob-height').value.trim();
+
+          var patch = {
+            name: name,
+            age: ageVal === '' ? null : parseInt(ageVal, 10),
+            startWeight: weightVal === '' ? null : Number(weightVal),
+            heightCm: heightVal === '' ? null : parseInt(heightVal, 10),
+            bodyGoal: goal,
+            gymDays: days,
+            units: units,
+            onboarded: true
+          };
+
+          store.saveSettings(patch).then(function (saved) {
+            if (saved.startWeight != null) {
+              return store.saveWeight({ date: S.today(), value: saved.startWeight });
+            }
+          }).then(function () {
+            U.closeSheet();
+            render();
+            U.toast('Perfil guardado', 'ok');
+          });
+        });
+      }
+    });
+  }
+
   function openBackups() {
     store.listBackups().then(function (rows) {
       var body = rows.length
@@ -852,6 +1056,12 @@
         break;
       }
       case 'units': store.saveSettings({ units: arg('units') }).then(function () { render(); }); break;
+      case 'bodygoal': store.saveSettings({ bodyGoal: arg('goal') }).then(function () { render(); }); break;
+      case 'cloud-login': openCloudLogin(); break;
+      case 'cloud-logout':
+        GL.cloud.signOut().then(function () { cloudUser = null; render(); U.toast('Sesión cerrada', 'ok'); });
+        break;
+      case 'cloud-sync': cloudSync(); break;
       case 'theme':
         store.saveSettings({ theme: arg('theme') }).then(function (s) { applyTheme(s.theme); render(); });
         break;
@@ -991,11 +1201,13 @@
 
     store.init().then(function () {
       applyTheme(store.settings().theme);
-      return refreshBackups();
+      return Promise.all([refreshBackups(), refreshCloudSession()]);
     }).then(function () {
       buildShell();
       state.selected = S.today();
       render();
+
+      setTimeout(maybeOpenOnboarding, store.settings().intro ? INTRO_MS + 400 : 500);
 
       document.addEventListener('click', onClick);
       document.getElementById('fab').addEventListener('click', function () { openForm(S.today(), null); });
@@ -1035,6 +1247,22 @@
           value = b;
         }
         if (key === 'name') value = value.trim() || 'Simón';
+        if (key === 'age') {
+          if (value === '') value = null;
+          else {
+            var ageN = parseInt(value, 10);
+            if (!(ageN >= 10 && ageN <= 100)) { U.toast('Entre 10 y 100 años', 'error'); el.value = store.settings().age == null ? '' : store.settings().age; return; }
+            value = ageN;
+          }
+        }
+        if (key === 'heightCm') {
+          if (value === '') value = null;
+          else {
+            var hN = parseInt(value, 10);
+            if (!(hN >= 100 && hN <= 250)) { U.toast('Entre 100 y 250 cm', 'error'); el.value = store.settings().heightCm == null ? '' : store.settings().heightCm; return; }
+            value = hN;
+          }
+        }
         var patch = {}; patch[key] = value;
         store.saveSettings(patch).then(function () { render(); U.toast('Guardado', 'ok'); });
       });

@@ -885,6 +885,15 @@
       '<input class="input" type="number" id="set-goal" data-set="goal" min="1" max="31" value="' + s.goal + '">' +
       '<span class="hint">Sesiones al mes. Con tus días programados salen unas ' +
       Math.round(s.gymDays.length * 4.33) + '.</span></div>' +
+      '<div class="field"><label for="set-age">Edad</label>' +
+      '<input class="input" type="number" id="set-age" data-set="age" min="10" max="100" value="' + (s.age == null ? '' : s.age) + '"></div>' +
+      '<div class="field"><label for="set-height">Altura (cm)</label>' +
+      '<input class="input" type="number" id="set-height" data-set="heightCm" min="100" max="250" value="' + (s.heightCm == null ? '' : s.heightCm) + '"></div>' +
+      '<div class="field"><label>Objetivo físico</label><div class="segmented" style="height:auto;flex-wrap:wrap">' +
+      GL.store.BODY_GOALS.map(function (g) {
+        return '<button data-act="bodygoal" data-goal="' + g.key + '"' +
+          (s.bodyGoal === g.key ? ' class="is-active"' : '') + '>' + esc(g.label) + '</button>';
+      }).join('') + '</div></div>' +
       '</div>';
 
     html += sectionTitle('Días de gimnasio');
@@ -920,6 +929,27 @@
       (s.intro ? '<button class="row" data-act="replay-intro"><div class="t"><b>Ver la intro</b>' +
         '<small>Reproducirla ahora.</small></div>' + icon('replay') + '</button>' : '') +
       '</div>';
+
+    /* --------------------------------------------------------- cuenta y nube */
+    html += sectionTitle('Cuenta y nube');
+    if (ctx.cloud) {
+      html += callout('is-good', 'shield', 'Respaldo activo',
+        'Conectado como <b>' + esc(ctx.cloud.email) + '</b>.' +
+        (s.lastSync ? ' Última sincronización hace ' + (ctx.syncAge === 0 ? 'menos de un día' : ctx.syncAge + ' días') + '.' : ' Todavía no sincronizaste.'));
+      html += '<div class="card flush">' +
+        '<button class="row" data-act="cloud-sync"><div class="t"><b>Sincronizar ahora</b>' +
+        '<small>Sube una copia de tus datos a la nube.</small></div>' + icon('upload') + '</button>' +
+        '<button class="row danger" data-act="cloud-logout"><div class="t"><b>Cerrar sesión</b>' +
+        '<small>Tus datos locales no se tocan.</small></div></button>' +
+        '</div>';
+    } else {
+      html += callout('is-flat', 'shield', 'Respaldo en la nube',
+        'Guardá una copia fuera del dispositivo, por si pasa algo. Login con código de un solo uso, sin contraseñas.');
+      html += '<div class="card flush">' +
+        '<button class="row" data-act="cloud-login"><div class="t"><b>Iniciar sesión</b>' +
+        '<small>Con tu email, por código</small></div>' + icon('share') + '</button>' +
+        '</div>';
+    }
 
     /* -------------------------------------------------- copias de seguridad */
     html += sectionTitle('Copias de seguridad');

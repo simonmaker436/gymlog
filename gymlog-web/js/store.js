@@ -168,8 +168,21 @@
     units: 'kg',
     theme: 'dark',       // es un cuaderno de gimnasio: oscuro de fábrica
     reminders: true,
-    demoSeeded: false
+    demoSeeded: false,
+    onboarded: false,         // ya completó la encuesta inicial de perfil
+    age: null,
+    heightCm: null,
+    startWeight: null,        // peso indicado en la encuesta inicial (solo referencia)
+    bodyGoal: null,           // 'ganar-musculo' | 'perder-grasa' | 'mantenerme' | 'rendimiento'
+    lastSync: null            // fecha de la última sincronización con la nube
   };
+
+  var BODY_GOALS = [
+    { key: 'ganar-musculo', label: 'Ganar músculo' },
+    { key: 'perder-grasa', label: 'Perder grasa' },
+    { key: 'mantenerme', label: 'Mantenerme' },
+    { key: 'rendimiento', label: 'Rendimiento' }
+  ];
 
   /* La intro tiene que decidirse antes de que arranque IndexedDB, así que el
      ajuste se copia también a localStorage, que sí se lee de forma inmediata. */
@@ -199,6 +212,23 @@
     out.goal = Math.max(1, Math.min(31, Math.round(Number(out.goal) || 12)));
     out.backfillDays = Math.max(0, Math.min(60, Math.round(Number(out.backfillDays) == null ? 7 : Number(out.backfillDays))));
     if (isNaN(out.backfillDays)) out.backfillDays = 7;
+
+    out.onboarded = !!out.onboarded;
+    if (out.age != null) {
+      var ageN = Math.round(Number(out.age));
+      out.age = (isNaN(ageN) || ageN < 10 || ageN > 100) ? null : ageN;
+    }
+    if (out.heightCm != null) {
+      var hN = Math.round(Number(out.heightCm));
+      out.heightCm = (isNaN(hN) || hN < 100 || hN > 250) ? null : hN;
+    }
+    if (out.startWeight != null) {
+      var wN = Number(out.startWeight);
+      out.startWeight = (isNaN(wN) || wN <= 0) ? null : Math.round(wN * 10) / 10;
+    }
+    if (!BODY_GOALS.some(function (g) { return g.key === out.bodyGoal; })) out.bodyGoal = null;
+    if (out.lastSync && isNaN(Date.parse(out.lastSync))) out.lastSync = null;
+
     return out;
   }
 
@@ -644,7 +674,8 @@
     },
 
     uid: uid,
-    DEFAULT_SETTINGS: DEFAULT_SETTINGS
+    DEFAULT_SETTINGS: DEFAULT_SETTINGS,
+    BODY_GOALS: BODY_GOALS
   };
 
   function clamp15(n) {
