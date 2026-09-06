@@ -29,6 +29,8 @@
   var bootTheme = null;
   var cloudUser = null; // { email, id } o null si no hay sesión
   var authEmail = '';
+  var authStep = 'landing';       // landing | email | code
+  var authMode = 'signin';        // signin | signup — nunca se crea una cuenta sin pedirlo
   var dayTickTimer = null;
 
   /* ------------------------------------------------------------ contexto */
@@ -81,11 +83,16 @@
   }
 
   function render(keepFocus) {
+    /* Estando en la pantalla de acceso no hay shell que pintar. Una subida en
+       segundo plano puede terminar justo después de cerrar sesión y llamar
+       aquí: sin esta guarda, revienta. */
+    var main = document.getElementById('main');
+    if (!main) return;
+
     var c = ctx();
     var def = VIEWS.find(function (v) { return v.id === state.view; });
     var out = state.view === 'settings' ? GL.views.settings(c) : GL.views[state.view](c);
 
-    var main = document.getElementById('main');
     main.innerHTML = '<div class="screen">' + out.html + '</div>';
 
     document.getElementById('topbar-title').textContent =
@@ -660,24 +667,55 @@
       ['catch'](function () { GL.cloud.setLastUserId(cloudUser.id); });
   }
 
-  /* --------------------------------------------------- pantalla de acceso */
+  /* --------------------------------------------------- pantalla de acceso
+     Tres pasos, y en todo momento se ve en cuál estás:
+       landing → elegir entre iniciar sesión o crear cuenta
+       email   → escribir el email (el encabezado recuerda qué elegiste)
+       code    → escribir el código de 6 dígitos                        */
   function renderAuth(step, email) {
     if (email !== undefined) authEmail = email;
+    authStep = step || 'landing';
+
+    var signup = authMode === 'signup';
+    var flowName = signup ? 'Crear cuenta' : 'Iniciar sesión';
     var body;
-    if (step === 'code') {
+
+    if (authStep === 'code') {
       body =
+        authHead(flowName, 2, 'Paso 2 de 2') +
         '<p class="muted">Te mandamos un código de 6 dígitos a<br><b>' + esc(authEmail) + '</b></p>' +
         '<div class="field"><label for="au-code">Código</label>' +
-        '<input class="input" id="au-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></div>' +
-        '<button class="btn primary block" data-act="auth-verify">Verificar</button>' +
-        '<button class="btn ghost block" data-act="auth-resend" style="margin-top:8px">Reenviar código</button>' +
-        '<button class="btn ghost block" data-act="auth-changeemail" style="margin-top:8px">Usar otro email</button>';
+        '<input class="input authcode" id="au-code" inputmode="numeric" maxlength="6" ' +
+        'autocomplete="one-time-code" placeholder="000000"></div>' +
+        '<button class="btn primary block" data-act="auth-verify">Entrar</button>' +
+        '<div class="authalt">' +
+        '<button type="button" data-act="auth-resend">Reenviar código</button>' +
+        '<span>·</span>' +
+        '<button type="button" data-act="auth-back">Cambiar email</button>' +
+        '</div>';
+
+    } else if (authStep === 'email') {
+      body =
+        authHead(flowName, 1, 'Paso 1 de 2') +
+        '<p class="muted">' + (signup
+          ? 'Con tu email alcanza. Te mandamos un código para confirmarlo — no hay contraseñas que recordar.'
+          : 'Escribí el email de tu cuenta y te mandamos un código para entrar.') + '</p>' +
+        '<div class="field"><label for="au-email">Email</label>' +
+        '<input class="input" type="email" id="au-email" autocomplete="email" ' +
+        'placeholder="vos@email.com" value="' + esc(authEmail) + '"></div>' +
+        '<button class="btn primary block" data-act="auth-send">Enviar código</button>' +
+        '<div class="authalt">' +
+        '<button type="button" data-act="auth-back">Volver</button>' +
+        '</div>';
+
     } else {
       body =
-        '<p class="muted">Iniciá sesión con tu email. Te mandamos un código, sin contraseñas — si es la primera vez, la cuenta se crea sola.</p>' +
-        '<div class="field"><label for="au-email">Email</label>' +
-        '<input class="input" type="email" id="au-email" autocomplete="email" placeholder="vos@email.com" value="' + esc(authEmail) + '"></div>' +
-        '<button class="btn primary block" data-act="auth-send">Enviar código</button>';
+        '<p class="muted authlead">Tu registro de entrenamientos, en todos tus dispositivos.</p>' +
+        '<div class="authactions">' +
+        '<button class="btn primary block" data-act="auth-mode" data-mode="signin">Iniciar sesión</button>' +
+        '<button class="btn ghost block" data-act="auth-mode" data-mode="signup">Crear cuenta</button>' +
+        '</div>' +
+        '<p class="authfoot">Los datos de este dispositivo no se pierden: se suben a la cuenta la primera vez que entrás.</p>';
     }
 
     document.getElementById('app').innerHTML =
@@ -686,8 +724,27 @@
       body +
       '</div></div>';
 
-    var input = document.getElementById(step === 'code' ? 'au-code' : 'au-email');
-    if (input) setTimeout(function () { input.focus(); }, 60);
+    var input = document.getElementById(authStep === 'code' ? 'au-code' : 'au-email');
+    if (input) {
+      setTimeout(function () { input.focus(); }, 60);
+      input.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        var go = document.querySelector('[data-act="' + (authStep === 'code' ? 'auth-verify' : 'auth-send') + '"]');
+        if (go) go.click();
+      });
+    }
+  }
+
+  /* encabezado con el nombre del paso y los dos puntitos de progreso */
+  function authHead(title, n, label) {
+    return '<div class="authhead">' +
+      '<h2>' + esc(title) + '</h2>' +
+      '<div class="authprogress" aria-label="' + esc(label) + '">' +
+      '<i' + (n >= 1 ? ' class="on"' : '') + '></i>' +
+      '<i' + (n >= 2 ? ' class="on"' : '') + '></i>' +
+      '<span>' + esc(label) + '</span>' +
+      '</div></div>';
   }
 
   /* ------------------------------------------------------- encuesta inicial */
@@ -708,11 +765,11 @@
         '<input class="input" id="ob-name" maxlength="24" autocomplete="off" value="' + esc(s.name || '') + '"></div>' +
         '<div class="field"><label for="ob-age">Edad</label>' +
         '<input class="input" type="number" id="ob-age" min="10" max="100" inputmode="numeric"></div>' +
-        '<div class="field"><label for="ob-weight">Peso (<span id="ob-weight-unit">' + esc(units) + '</span>)</label>' +
+        '<div class="field"><label for="ob-weight">Peso en <span id="ob-weight-unit">' + esc(units) + '</span></label>' +
         '<input class="input" type="number" id="ob-weight" min="1" step="0.1" inputmode="decimal"></div>' +
-        '<div class="field"><label for="ob-height">Altura (cm)</label>' +
+        '<div class="field"><label for="ob-height">Altura en cm</label>' +
         '<input class="input" type="number" id="ob-height" min="100" max="250" inputmode="numeric"></div>' +
-        '<div class="field"><label>Objetivo</label><div class="segmented" id="ob-goal" style="height:auto;flex-wrap:wrap">' +
+        '<div class="field"><label>Objetivo</label><div class="optiongrid" id="ob-goal">' +
         GL.store.BODY_GOALS.map(function (g) {
           return '<button type="button" data-goal="' + g.key + '"' + (goal === g.key ? ' class="is-active"' : '') + '>' + esc(g.label) + '</button>';
         }).join('') + '</div></div>' +
@@ -904,40 +961,61 @@
       case 'bodygoal': store.saveSettings({ bodyGoal: arg('goal') }).then(function () { render(); }); break;
       case 'cloud-logout':
         clearInterval(dayTickTimer);
-        GL.cloud.signOut().then(function () { cloudUser = null; renderAuth('email', ''); });
+        GL.cloud.signOut().then(function () {
+          cloudUser = null;
+          authMode = 'signin';
+          renderAuth('landing', '');
+        });
         break;
       case 'cloud-sync': cloudSync(); break;
+
+      case 'auth-mode':
+        authMode = arg('mode') === 'signup' ? 'signup' : 'signin';
+        renderAuth('email');
+        break;
+
+      case 'auth-back':
+        renderAuth(authStep === 'code' ? 'email' : 'landing');
+        break;
+
       case 'auth-send': {
         var authEmailVal = document.getElementById('au-email').value.trim();
         if (!/^\S+@\S+\.\S+$/.test(authEmailVal)) { U.toast('Escribí un email válido', 'error'); break; }
+        var sendLabel = t.textContent;
         t.disabled = true; t.textContent = 'Enviando…';
-        GL.cloud.sendCode(authEmailVal).then(function () {
+        var ask = authMode === 'signup'
+          ? GL.cloud.sendSignUpCode(authEmailVal)
+          : GL.cloud.sendSignInCode(authEmailVal);
+        ask.then(function (res) {
           renderAuth('code', authEmailVal);
+          if (res && res.existed) U.toast('Ese email ya tenía cuenta: entrás con el código', 'ok');
         })['catch'](function (err) {
-          t.disabled = false; t.textContent = 'Enviar código';
+          t.disabled = false; t.textContent = sendLabel;
           U.toast(err.message || 'No se pudo enviar el código', 'error');
+          // sin cuenta y queriendo entrar: el camino correcto es crearla
+          if (err.noAccount) { authMode = 'signup'; setTimeout(function () { renderAuth('email', authEmailVal); }, 900); }
         });
         break;
       }
       case 'auth-verify': {
         var authCode = document.getElementById('au-code').value.trim();
         if (!/^\d{6}$/.test(authCode)) { U.toast('El código son 6 números', 'error'); break; }
+        var verifyLabel = t.textContent;
         t.disabled = true; t.textContent = 'Verificando…';
         GL.cloud.verifyCode(authEmail, authCode).then(function () {
           return refreshCloudSession();
         }).then(function () {
           return enterApp();
         })['catch'](function (err) {
-          t.disabled = false; t.textContent = 'Verificar';
+          t.disabled = false; t.textContent = verifyLabel;
           U.toast(err.message || 'Código incorrecto', 'error');
         });
         break;
       }
       case 'auth-resend':
-        GL.cloud.sendCode(authEmail).then(function () { U.toast('Código reenviado', 'ok'); })
+        GL.cloud.resendCode(authEmail).then(function () { U.toast('Código reenviado', 'ok'); })
           ['catch'](function (err) { U.toast(err.message || 'No se pudo reenviar', 'error'); });
         break;
-      case 'auth-changeemail': renderAuth('email', ''); break;
       case 'theme':
         store.saveSettings({ theme: arg('theme') }).then(function (s) { applyTheme(s.theme); render(); });
         break;
@@ -1172,7 +1250,7 @@
     }).then(function () {
       wireGlobalEvents();
       scheduleIntroExit();
-      if (!cloudUser) { renderAuth('email', ''); return; }
+      if (!cloudUser) { renderAuth('landing', ''); return; }
       return enterApp();
     })['catch'](function (err) {
       var boot = document.getElementById('boot');

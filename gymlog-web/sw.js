@@ -1,5 +1,5 @@
 /* Service worker: guarda la app en caché para que funcione sin conexión. */
-var CACHE = 'gymlog-v3';
+var CACHE = 'gymlog-v5';
 var ASSETS = [
   './',
   './index.html',
@@ -51,7 +51,29 @@ self.addEventListener('fetch', function (e) {
     return;
   }
 
-  // resto: caché primero, y refresca en segundo plano
+  /* El código de la app (JS y CSS) va a la red primero: si hay internet
+     siempre se ve la versión recién desplegada, y si no la hay se usa la copia
+     guardada. Antes era al revés y por eso un deploy correcto podía seguir
+     mostrando la versión vieja durante días. */
+  var url = new URL(req.url);
+  var isCode = url.origin === location.origin && /\.(?:js|css)$/.test(url.pathname);
+
+  if (isCode) {
+    e.respondWith(
+      fetch(req).then(function (res) {
+        if (res && res.status === 200 && res.type === 'basic') {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (c) { c.put(req, copy); });
+        }
+        return res;
+      })['catch'](function () {
+        return caches.match(req);
+      })
+    );
+    return;
+  }
+
+  // el resto (iconos, manifiesto): caché primero, y refresca en segundo plano
   e.respondWith(
     caches.match(req).then(function (cached) {
       var net = fetch(req).then(function (res) {

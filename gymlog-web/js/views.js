@@ -878,7 +878,7 @@
       '<input class="input" type="number" id="set-age" data-set="age" min="10" max="100" value="' + (s.age == null ? '' : s.age) + '"></div>' +
       '<div class="field"><label for="set-height">Altura (cm)</label>' +
       '<input class="input" type="number" id="set-height" data-set="heightCm" min="100" max="250" value="' + (s.heightCm == null ? '' : s.heightCm) + '"></div>' +
-      '<div class="field"><label>Objetivo físico</label><div class="segmented" style="height:auto;flex-wrap:wrap">' +
+      '<div class="field"><label>Objetivo físico</label><div class="optiongrid">' +
       GL.store.BODY_GOALS.map(function (g) {
         return '<button data-act="bodygoal" data-goal="' + g.key + '"' +
           (s.bodyGoal === g.key ? ' class="is-active"' : '') + '>' + esc(g.label) + '</button>';
