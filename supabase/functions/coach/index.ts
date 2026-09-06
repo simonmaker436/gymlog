@@ -1,13 +1,19 @@
 /* =========================================================================
-   coach — recomendación de entrenamiento con Gemini
+   coach — recomendación de entrenamiento, con Gemini y Groq de respaldo
    =========================================================================
    El cliente manda un resumen de sus últimas sesiones; acá se calculan los
    hechos (cuántos días hace de cada tipo, medias, notas) y se le pide al
    modelo que los redacte. Los números NO los inventa el modelo: se los damos
    ya masticados para que no se equivoque contando.
 
-   La clave de Gemini vive en el entorno de la función (GEMINI_API_KEY) y
-   nunca sale de acá.
+   Se pregunta primero a Gemini. Si falla por lo que sea —cuota agotada,
+   caída, respuesta ilegible— la MISMA pregunta va a Groq. El contexto lo
+   arma buildPrompt() una sola vez y lo comparten las dos: lo único distinto
+   es cómo se les pide el JSON, porque Gemini tiene responseSchema y a Groq
+   hay que decírselo por escrito.
+
+   Las claves (GEMINI_API_KEY, GROQ_API_KEY) viven en el entorno de la
+   función y nunca salen de acá.
 
    El modelo de datos de GymLog no tiene ejercicios ni series: solo fecha,
    tipo, duración, energía, sensación, dificultad, peso y notas. El prompt lo
@@ -27,6 +33,16 @@
 export const GEMINI_MODEL = "gemini-3.6-flash";
 const GEMINI_URL =
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+/* Respaldo: cuando Gemini falla (cuota agotada, caída, lo que sea), la misma
+   pregunta va a Groq. Endpoint compatible con OpenAI.
+
+   Ojo: Groq ya no ofrece ningún Llama de chat. llama-3.3-70b-versatile está
+   dado de baja, y en la lista de la clave no queda ninguno de la familia.
+   Para ver los vigentes:
+     curl -H "Authorization: Bearer $GROQ_API_KEY" https://api.groq.com/openai/v1/models */
+export const GROQ_MODEL = "openai/gpt-oss-120b";
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 const MAX_WORKOUTS = 30;
 
@@ -294,43 +310,33 @@ export function friendlyGeminiError(status: number, body: string): string {
   return "No se pudo generar la recomendación ahora mismo.";
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS, "Content-Type": "application/json" },
-  });
+/* Groq habla el dialecto de OpenAI y sus errores son otros. */
+export function friendlyGroqError(status: number, body: string): string {
+  const b = (body || "").toLowerCase();
+  if (status === 429 || b.includes("rate_limit") || b.includes("quota")) {
+    return "También se agotó la cuota del respaldo. Probá de nuevo más tarde.";
+  }
+  if (status === 401 || b.includes("invalid_api_key")) {
+    return "La clave del respaldo no es válida. Revisá GROQ_API_KEY en Supabase.";
+  }
+  if (status === 404 || b.includes("model_not_found") || b.includes("decommissioned")) {
+    return "El modelo del respaldo ya no está disponible.";
+  }
+  if (status >= 500) {
+    return "El respaldo no está disponible en este momento.";
+  }
+  return "El respaldo tampoco pudo generar la recomendación.";
 }
 
-/* ------------------------------------------------------------- handler */
-export async function handle(req: Request): Promise<Response> {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (req.method !== "POST") return json({ error: "Método no permitido." }, 405);
+/* Resultado de preguntarle a una IA: o sale bien, o explica por qué no. */
+export type AskResult =
+  | { ok: true; advice: Advice }
+  | { ok: false; error: string };
 
-  const apiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!apiKey) {
-    return json({ error: "Falta configurar GEMINI_API_KEY en Supabase." }, 500);
-  }
-
-  let payload: { workouts?: unknown; today?: unknown };
-  try {
-    payload = await req.json();
-  } catch {
-    return json({ error: "El cuerpo de la petición no es JSON válido." }, 400);
-  }
-
-
-  const workouts = cleanWorkouts(payload.workouts);
-  if (workouts.length < 3) {
-    return json({ error: "Hacen falta al menos 3 sesiones registradas." }, 400);
-  }
-
-  const today = typeof payload.today === "string" &&
-      /^\d{4}-\d{2}-\d{2}$/.test(payload.today)
-    ? payload.today
-    : new Date().toISOString().slice(0, 10);
-
-  const prompt = buildPrompt(summarize(workouts, today));
-
+/* ------------------------------------------------------------- Gemini
+   Aprovecha responseSchema, que obliga al modelo a devolver los dos campos
+   sin tener que pedírselo por escrito. */
+export async function askGemini(prompt: string, apiKey: string): Promise<AskResult> {
   let res: Response;
   try {
     res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(apiKey)}`, {
@@ -359,39 +365,164 @@ export async function handle(req: Request): Promise<Response> {
       }),
     });
   } catch {
-    return json({ error: "No se pudo contactar con la IA. Probá más tarde." }, 502);
+    return { ok: false, error: "No se pudo contactar con la IA. Probá más tarde." };
   }
 
   const text = await res.text();
   if (!res.ok) {
     console.error("gemini", res.status, text.slice(0, 500));
-    return json({ error: friendlyGeminiError(res.status, text) }, 502);
+    return { ok: false, error: friendlyGeminiError(res.status, text) };
   }
 
-  let out: Advice | null = null;
+  let advice: Advice | null = null;
   let cortada = false;
   try {
     const data = JSON.parse(text);
     cortada = data?.candidates?.[0]?.finishReason === "MAX_TOKENS";
-    out = parseModelJson(extractText(data));
-  } catch {
-    out = null;
-  }
+    advice = parseModelJson(extractText(data));
+  } catch { /* advice queda en null */ }
 
-  if (!out) {
-    console.error("respuesta ininteligible", res.status, text.slice(0, 800));
-    /* Vale la pena distinguirlo: si vuelve a pasar, el mensaje ya dice qué
-       tocar (maxOutputTokens) en vez de mandar a mirar logs. */
-    return json({
+  if (!advice) {
+    console.error("gemini ininteligible", res.status, text.slice(0, 800));
+    return {
+      ok: false,
       error: cortada
         ? "La IA se quedó sin espacio para responder. Hay que subir maxOutputTokens en la función."
         : "La IA respondió algo que no se pudo leer.",
-    }, 502);
+    };
+  }
+  return { ok: true, advice };
+}
+
+/* --------------------------------------------------------------- Groq
+   Mismo prompt que Gemini, palabra por palabra: los mismos días por tipo,
+   las mismas medias, las mismas notas y las mismas reglas. Lo único que se
+   suma es cómo pedir el JSON, porque Groq no tiene responseSchema y hay que
+   decírselo por escrito.
+
+   OJO: con response_format json_object, Groq EXIGE que el mensaje contenga
+   la palabra «json»; si no, responde 400. Por eso está escrita abajo, y hay
+   una prueba que lo comprueba. */
+export const GROQ_JSON_HINT = `
+
+FORMATO DE SALIDA: respondé únicamente con un objeto json válido, sin texto
+antes ni después y sin bloques de código. Exactamente estas dos claves:
+{"recomendacion": "...", "consejo": "..."}`;
+
+export function groqPrompt(sharedPrompt: string): string {
+  return sharedPrompt + GROQ_JSON_HINT;
+}
+
+export async function askGroq(prompt: string, apiKey: string): Promise<AskResult> {
+  let res: Response;
+  try {
+    res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        temperature: 0.7,
+        max_tokens: 800,
+        response_format: { type: "json_object" },
+        messages: [{ role: "user", content: groqPrompt(prompt) }],
+      }),
+    });
+  } catch {
+    return { ok: false, error: "No se pudo contactar con el respaldo." };
+  }
+
+  const text = await res.text();
+  if (!res.ok) {
+    console.error("groq", res.status, text.slice(0, 500));
+    return { ok: false, error: friendlyGroqError(res.status, text) };
+  }
+
+  let advice: Advice | null = null;
+  try {
+    const data = JSON.parse(text);
+    advice = parseModelJson(data?.choices?.[0]?.message?.content ?? "");
+  } catch { /* advice queda en null */ }
+
+  if (!advice) {
+    console.error("groq ininteligible", res.status, text.slice(0, 800));
+    return { ok: false, error: "El respaldo respondió algo que no se pudo leer." };
+  }
+  return { ok: true, advice };
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, "Content-Type": "application/json" },
+  });
+}
+
+/* ------------------------------------------------------------- handler */
+export async function handle(req: Request): Promise<Response> {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return json({ error: "Método no permitido." }, 405);
+
+  const geminiKey = Deno.env.get("GEMINI_API_KEY");
+  const groqKey = Deno.env.get("GROQ_API_KEY");
+  if (!geminiKey && !groqKey) {
+    return json({ error: "Falta configurar GEMINI_API_KEY o GROQ_API_KEY en Supabase." }, 500);
+  }
+
+  let payload: { workouts?: unknown; today?: unknown };
+  try {
+    payload = await req.json();
+  } catch {
+    return json({ error: "El cuerpo de la petición no es JSON válido." }, 400);
+  }
+
+
+
+  const workouts = cleanWorkouts(payload.workouts);
+  if (workouts.length < 3) {
+    return json({ error: "Hacen falta al menos 3 sesiones registradas." }, 400);
+  }
+
+  const today = typeof payload.today === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(payload.today)
+    ? payload.today
+    : new Date().toISOString().slice(0, 10);
+
+  /* Un solo contexto para las dos IAs: los mismos días por tipo, las mismas
+     medias, las mismas notas y las mismas reglas. Groq solo le suma, aparte,
+     cómo tiene que formatear el JSON. */
+  const prompt = buildPrompt(summarize(workouts, today));
+
+  const fallos: string[] = [];
+  let advice: Advice | null = null;
+  let provider = "";
+
+  if (geminiKey) {
+    const r = await askGemini(prompt, geminiKey);
+    if (r.ok) { advice = r.advice; provider = "gemini"; }
+    else fallos.push(r.error);
+  }
+
+  /* Cualquier fallo de Gemini (cuota, caída, respuesta ilegible) manda la
+     misma pregunta a Groq antes de darse por vencido. */
+  if (!advice && groqKey) {
+    const r = await askGroq(prompt, groqKey);
+    if (r.ok) { advice = r.advice; provider = "groq"; }
+    else fallos.push(r.error);
+  }
+
+  if (!advice) {
+    /* Se muestra el primer motivo, que es el de la IA principal y el que
+       suele importar; si hubo dos, el segundo va detrás. */
+    return json({ error: fallos.join(" ") || "No se pudo generar la recomendación." }, 502);
   }
 
   return json({
-    recomendacion: out.recomendacion,
-    consejo: out.consejo,
+    recomendacion: advice.recomendacion,
+    consejo: advice.consejo,
+    provider,
     generatedAt: new Date().toISOString(),
   });
 }
