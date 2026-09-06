@@ -152,17 +152,6 @@
         }).join(''));
     }
 
-    /* ---- aviso de copia */
-    if (ctx.backupAge != null && ctx.backupAge >= 30 && ctx.workouts.length >= 5) {
-      html += callout('is-warn', 'shield', 'Toca hacer copia',
-        'Hace <b>' + ctx.backupAge + ' días</b> de tu última exportación. Los datos viven solo en este dispositivo.',
-        '<button class="btn sm ghost" data-act="export">Exportar</button>');
-    } else if (ctx.backupAge == null && ctx.workouts.length >= 5) {
-      html += callout('is-warn', 'shield', 'Sin copia de seguridad',
-        'Nunca has exportado tus datos. Si el navegador los borra, no hay vuelta atrás.',
-        '<button class="btn sm ghost" data-act="export">Exportar</button>');
-    }
-
     /* ---- semana */
     var diff = week.count - prevSoFar;
     var ref = weekOver ? 'que la semana pasada' : 'que a estas alturas de la semana pasada';
@@ -930,45 +919,16 @@
         '<small>Reproducirla ahora.</small></div>' + icon('replay') + '</button>' : '') +
       '</div>';
 
-    /* --------------------------------------------------------- cuenta y nube */
-    html += sectionTitle('Cuenta y nube');
-    if (ctx.cloud) {
-      html += callout('is-good', 'shield', 'Respaldo activo',
-        'Conectado como <b>' + esc(ctx.cloud.email) + '</b>.' +
-        (s.lastSync ? ' Última sincronización hace ' + (ctx.syncAge === 0 ? 'menos de un día' : ctx.syncAge + ' días') + '.' : ' Todavía no sincronizaste.'));
-      html += '<div class="card flush">' +
-        '<button class="row" data-act="cloud-sync"><div class="t"><b>Sincronizar ahora</b>' +
-        '<small>Sube una copia de tus datos a la nube.</small></div>' + icon('upload') + '</button>' +
-        '<button class="row danger" data-act="cloud-logout"><div class="t"><b>Cerrar sesión</b>' +
-        '<small>Tus datos locales no se tocan.</small></div></button>' +
-        '</div>';
-    } else {
-      html += callout('is-flat', 'shield', 'Respaldo en la nube',
-        'Guardá una copia fuera del dispositivo, por si pasa algo. Login con código de un solo uso, sin contraseñas.');
-      html += '<div class="card flush">' +
-        '<button class="row" data-act="cloud-login"><div class="t"><b>Iniciar sesión</b>' +
-        '<small>Con tu email, por código</small></div>' + icon('share') + '</button>' +
-        '</div>';
-    }
-
-    /* -------------------------------------------------- copias de seguridad */
-    html += sectionTitle('Copias de seguridad');
-    var persisted = GL.store.persisted;
-    html += callout(persisted === true ? 'is-good' : 'is-warn', 'shield',
-      persisted === true ? 'Almacenamiento protegido' : 'Tus datos viven solo aquí',
-      persisted === true
-        ? 'El navegador se ha comprometido a no borrar tus datos por falta de uso. Aun así, exporta de vez en cuando.'
-        : 'No hay servidor ni cuenta. Si borras los datos del navegador o pasas semanas sin abrir la app, pueden desaparecer. Exporta cada pocas semanas.');
-
+    /* --------------------------------------------------------------- cuenta */
+    html += sectionTitle('Cuenta');
+    html += callout('is-good', 'shield', 'Sincronizado',
+      'Conectado como <b>' + esc(ctx.cloud ? ctx.cloud.email : '') + '</b>. Tus datos se guardan solos en tu cuenta.' +
+      (s.lastSync ? ' Última sincronización hace ' + (ctx.syncAge === 0 ? 'menos de un día' : ctx.syncAge + ' días') + '.' : ''));
     html += '<div class="card flush">' +
-      '<button class="row" data-act="export"><div class="t"><b>Exportar</b>' +
-      '<small>' + (s.lastExport
-        ? 'Última copia hace ' + (ctx.backupAge === 0 ? 'menos de un día' : ctx.backupAge + ' días')
-        : 'Nunca has exportado') + '</small></div>' + icon('share') + '</button>' +
-      '<button class="row" data-act="import"><div class="t"><b>Importar</b>' +
-      '<small>Recupera una copia desde un archivo o texto.</small></div>' + icon('upload') + '</button>' +
-      '<button class="row" data-act="backups"><div class="t"><b>Copias automáticas</b>' +
-      '<small>' + ctx.backupCount + (ctx.backupCount === 1 ? ' guardada' : ' guardadas') + ' dentro de la app.</small></div>' + icon('history') + '</button>' +
+      '<button class="row" data-act="cloud-sync"><div class="t"><b>Sincronizar ahora</b>' +
+      '<small>Forzar una subida, por si acaso.</small></div>' + icon('upload') + '</button>' +
+      '<button class="row danger" data-act="cloud-logout"><div class="t"><b>Cerrar sesión</b>' +
+      '<small>Volvés a la pantalla de acceso.</small></div></button>' +
       '</div>';
 
     html += sectionTitle('Datos');
@@ -986,7 +946,7 @@
       '<div class="muted" style="font-size:12.5px;line-height:1.7">' +
       'GymLog · versión 2.0<br>' +
       'Almacenamiento: <b>' + (GL.store.storageMode === 'indexeddb' ? 'IndexedDB' : 'localStorage (respaldo)') + '</b><br>' +
-      'Persistente: <b>' + (persisted === true ? 'sí' : persisted === false ? 'no concedido' : 'no disponible') + '</b><br>' +
+      'Persistente: <b>' + (GL.store.persisted === true ? 'sí' : GL.store.persisted === false ? 'no concedido' : 'no disponible') + '</b><br>' +
       '<span id="storage-estimate">Calculando espacio…</span>' +
       '</div></div>';
 

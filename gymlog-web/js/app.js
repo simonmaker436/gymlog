@@ -27,17 +27,14 @@
   };
 
   var bootTheme = null;
-  var backupCount = 0;
   var cloudUser = null; // { email, id } o null si no hay sesión
+  var authEmail = '';
+  var dayTickTimer = null;
 
   /* ------------------------------------------------------------ contexto */
   function ctx() {
     var workouts = store.workouts();
     var settings = store.settings();
-    var age = null;
-    if (settings.lastExport) {
-      age = Math.max(0, Math.floor((Date.now() - new Date(settings.lastExport).getTime()) / 86400000));
-    }
     return {
       state: state,
       settings: settings,
@@ -51,8 +48,6 @@
       win: settings.backfillDays,
       eff: S.effectiveStart(settings.startDate, workouts),
       hasDemo: store.hasDemo(),
-      backupAge: age,
-      backupCount: backupCount,
       cloud: cloudUser,
       syncAge: settings.lastSync
         ? Math.max(0, Math.floor((Date.now() - new Date(settings.lastSync).getTime()) / 86400000))
@@ -602,105 +597,10 @@
   }
 
   /* ------------------------------------------------- exportar / importar */
-  function openExport() {
-    var json = JSON.stringify(store.exportData(), null, 2);
-    var c = ctx();
-    var name = 'gymlog-' + S.today() + '.json';
-
-    U.openSheet({
-      title: 'Exportar',
-      body:
-        '<p style="margin:0;font-size:14px;color:var(--text-dim)">' + c.workouts.length +
-        (c.workouts.length === 1 ? ' registro' : ' registros') + ' y ' + c.weights.length +
-        ' mediciones. Guárdalo en Archivos, iCloud o donde prefieras.</p>' +
-        '<div class="btn-row">' +
-        '<button class="btn primary" id="x-share">' + icon('share') + 'Guardar</button>' +
-        '<button class="btn ghost" id="x-copy">Copiar</button>' +
-        '</div>' +
-        '<div class="field"><label for="x-text">Copia en texto</label>' +
-        '<textarea class="input" id="x-text" readonly style="min-height:140px;font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">' +
-        esc(json) + '</textarea>' +
-        '<span class="hint">Si el guardado no funciona en tu navegador, copia este texto y pégalo en una nota.</span></div>',
-      onMount: function (sheet) {
-        sheet.querySelector('#x-share').addEventListener('click', function () {
-          deliverFile(name, new Blob([json], { type: 'application/json' }), 'application/json')
-            .then(function (r) { if (r !== 'cancel') store.markExported().then(function () { render(); }); });
-        });
-        sheet.querySelector('#x-copy').addEventListener('click', function () {
-          var ta = sheet.querySelector('#x-text');
-          var done = function () { U.toast('Copiado', 'ok'); store.markExported(); };
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(json).then(done)['catch'](function () {
-              ta.select(); document.execCommand('copy'); done();
-            });
-          } else { ta.select(); document.execCommand('copy'); done(); }
-        });
-      }
-    });
-  }
-
-  function openImport() {
-    U.openSheet({
-      title: 'Importar',
-      body:
-        '<div class="callout is-flat" style="padding:12px 14px">' + icon('info') +
-        '<div><h3 style="font-size:13.5px">Elige el modo</h3>' +
-        '<p style="font-size:12.5px">«Reemplazar» borra lo actual (se guarda una copia antes). «Combinar» añade.</p>' +
-        '</div></div>' +
-        '<div class="field"><label>Modo</label><div class="segmented" id="i-mode">' +
-        '<button data-mode="replace" class="is-active">Reemplazar</button>' +
-        '<button data-mode="merge">Combinar</button>' +
-        '</div></div>' +
-        '<div class="field"><label>Desde un archivo</label>' +
-        '<input class="input" type="file" id="i-file" accept="application/json,.json"></div>' +
-        '<div class="field"><label for="i-text">O pega el texto</label>' +
-        '<textarea class="input" id="i-text" placeholder=\'{"app":"gymlog", …}\' style="min-height:110px;font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></div>',
-      footer: '<button class="btn primary block" id="i-go">' + icon('upload') + 'Importar</button>',
-      onMount: function (sheet) {
-        var mode = 'replace';
-        sheet.querySelector('#i-mode').addEventListener('click', function (e) {
-          var b = e.target.closest('[data-mode]');
-          if (!b) return;
-          mode = b.getAttribute('data-mode');
-          Array.prototype.forEach.call(this.children, function (x) { x.classList.toggle('is-active', x === b); });
-        });
-
-        function run(text) {
-          var payload;
-          try { payload = JSON.parse(text); }
-          catch (e) { U.toast('El texto no es un JSON válido', 'error'); return; }
-          store.importData(payload, mode).then(function (r) {
-            U.closeSheet();
-            state.month = S.monthKey(S.today());
-            applyTheme(store.settings().theme);
-            refreshBackups();
-            render();
-            U.toast('Importados ' + r.workouts + ' registros', 'ok');
-            syncAchievements(false);
-          })['catch'](function (err) { U.toast(err.message, 'error'); });
-        }
-
-        sheet.querySelector('#i-go').addEventListener('click', function () {
-          var file = sheet.querySelector('#i-file').files[0];
-          var text = sheet.querySelector('#i-text').value.trim();
-          if (file) {
-            var fr = new FileReader();
-            fr.onload = function () { run(String(fr.result)); };
-            fr.onerror = function () { U.toast('No se pudo leer el archivo', 'error'); };
-            fr.readAsText(file);
-          } else if (text) run(text);
-          else U.toast('Elige un archivo o pega el texto', 'error');
-        });
-      }
-    });
-  }
-
-  /* -------------------------------------------------- copias automáticas */
-  function refreshBackups() {
-    return store.listBackups().then(function (rows) { backupCount = rows.length; return rows; });
-  }
-
-  /* ------------------------------------------------------- nube (Supabase) */
+  /* ------------------------------------------------------- nube (Supabase)
+     El login es obligatorio: sin sesión no hay app, solo la pantalla de
+     acceso. Los datos viven en la cuenta, no en "este dispositivo": cada
+     cambio se sube solo, en segundo plano. */
   function refreshCloudSession() {
     if (!GL.cloud || !GL.cloud.ready()) { cloudUser = null; return Promise.resolve(null); }
     return GL.cloud.session().then(function (sess) {
@@ -709,101 +609,85 @@
     })['catch'](function () { cloudUser = null; return null; });
   }
 
-  function openCloudVerify(email) {
-    U.openSheet({
-      title: 'Ingresá el código',
-      body: '<p class="muted" style="margin:0 0 12px;font-size:13px">Te mandamos un código de 6 dígitos a <b>' +
-        esc(email) + '</b>. Puede tardar un minuto.</p>' +
-        '<div class="field"><label for="cl-code">Código</label>' +
-        '<input class="input" id="cl-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></div>' +
-        '<button class="btn ghost" id="cl-resend" type="button" style="margin-top:4px">Reenviar código</button>',
-      footer: '<button class="btn primary block" id="cl-verify">Verificar</button>',
-      onMount: function (sheet) {
-        sheet.querySelector('#cl-code').focus();
-        sheet.querySelector('#cl-verify').addEventListener('click', function () {
-          var code = sheet.querySelector('#cl-code').value.trim();
-          if (!/^\d{6}$/.test(code)) { U.toast('El código son 6 números', 'error'); return; }
-          var btn = sheet.querySelector('#cl-verify');
-          btn.disabled = true; btn.textContent = 'Verificando…';
-          GL.cloud.verifyCode(email, code).then(function () {
-            return refreshCloudSession();
-          }).then(function () {
-            U.closeSheet();
-            render();
-            U.toast('Sesión iniciada', 'ok');
-            maybeOfferRestore();
-          })['catch'](function (err) {
-            btn.disabled = false; btn.textContent = 'Verificar';
-            U.toast(err.message || 'Código incorrecto', 'error');
-          });
-        });
-        sheet.querySelector('#cl-resend').addEventListener('click', function () {
-          GL.cloud.sendCode(email).then(function () { U.toast('Código reenviado', 'ok'); })
-            ['catch'](function (err) { U.toast(err.message || 'No se pudo reenviar', 'error'); });
-        });
-      }
-    });
+  function pushSilently() {
+    if (!cloudUser) return Promise.resolve();
+    return GL.cloud.push(store.exportData()).then(function () {
+      return store.saveSettings({ lastSync: new Date().toISOString() });
+    })['catch'](function () { /* sin conexión: se reintenta en el próximo cambio */ });
   }
 
-  function openCloudLogin() {
-    U.openSheet({
-      title: 'Iniciar sesión',
-      body: '<p class="muted" style="margin:0 0 12px;font-size:13px">Te mandamos un código de 6 dígitos por email. Nada de contraseñas.</p>' +
-        '<div class="field"><label for="cl-email">Email</label>' +
-        '<input class="input" type="email" id="cl-email" autocomplete="email" placeholder="vos@email.com"></div>',
-      footer: '<button class="btn primary block" id="cl-send">Enviar código</button>',
-      onMount: function (sheet) {
-        sheet.querySelector('#cl-email').focus();
-        sheet.querySelector('#cl-send').addEventListener('click', function () {
-          var email = sheet.querySelector('#cl-email').value.trim();
-          if (!/^\S+@\S+\.\S+$/.test(email)) { U.toast('Escribí un email válido', 'error'); return; }
-          var btn = sheet.querySelector('#cl-send');
-          btn.disabled = true; btn.textContent = 'Enviando…';
-          GL.cloud.sendCode(email).then(function () {
-            U.closeSheet();
-            setTimeout(function () { openCloudVerify(email); }, 0);
-          })['catch'](function (err) {
-            btn.disabled = false; btn.textContent = 'Enviar código';
-            U.toast(err.message || 'No se pudo enviar el código', 'error');
-          });
-        });
-      }
+  var syncTimer = null;
+  function scheduleSync() {
+    if (!cloudUser) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () { pushSilently().then(function () { render(); }); }, 1500);
+  }
+
+  /* Envuelve los métodos que cambian datos para subirlos solos a la nube,
+     sin tocar cada punto donde se llaman. */
+  var AUTOSYNC_METHODS = ['saveWorkout', 'deleteWorkout', 'saveWeight', 'deleteWeight',
+    'saveMeasurement', 'deleteMeasurement', 'saveSettings', 'saveAchievements',
+    'clearAll', 'importData', 'seedDemo', 'clearDemo'];
+  function wrapStoreForAutoSync() {
+    AUTOSYNC_METHODS.forEach(function (name) {
+      var orig = store[name];
+      store[name] = function () {
+        var r = orig.apply(store, arguments);
+        if (r && typeof r.then === 'function') r.then(scheduleSync, function () { }); else scheduleSync();
+        return r;
+      };
     });
   }
 
   function cloudSync() {
-    if (!cloudUser) { U.toast('Iniciá sesión primero', 'error'); return; }
+    if (!cloudUser) return;
     U.toast('Sincronizando…');
-    GL.cloud.push(store.exportData()).then(function () {
-      return store.saveSettings({ lastSync: new Date().toISOString() });
-    }).then(function () {
-      render();
-      U.toast('Copia subida a la nube', 'ok');
-    })['catch'](function (err) {
-      U.toast(err.message || 'No se pudo sincronizar', 'error');
-    });
+    pushSilently().then(function () { render(); U.toast('Copia subida a la nube', 'ok'); });
   }
 
-  /* Si el dispositivo está vacío y hay algo guardado en la nube, se ofrece
-     restaurarlo. Si ya hay datos locales, no se toca nada por las dudas. */
-  function maybeOfferRestore() {
-    if (store.workouts().length) return;
-    GL.cloud.pull().then(function (row) {
-      if (!row || !row.payload) return;
-      return U.confirmDialog({
-        title: 'Copia encontrada en la nube',
-        message: 'Encontramos un respaldo guardado. ¿Restaurarlo en este dispositivo?',
-        confirmLabel: 'Restaurar'
-      }).then(function (ok) {
-        if (!ok) return;
-        return store.importData(row.payload, 'replace').then(function () {
-          state.month = S.monthKey(S.today());
-          applyTheme(store.settings().theme);
-          render();
-          U.toast('Datos restaurados', 'ok');
-        });
-      });
-    })['catch'](function () { });
+  /* Trae lo que haya en la nube y lo combina con lo local. Si la cuenta que
+     inicia sesión es distinta a la última usada en este dispositivo, se
+     limpia todo antes: así una cuenta nunca ve los datos de otra. */
+  function resolveAccountData() {
+    var lastId = GL.cloud.lastUserId();
+    var switched = lastId && lastId !== cloudUser.id;
+    var wipe = switched ? store.clearAll(true) : Promise.resolve();
+    return wipe.then(function () { return GL.cloud.pull(); })
+      .then(function (row) {
+        if (row && row.payload) return store.importData(row.payload, 'merge');
+      })
+      .then(function () { GL.cloud.setLastUserId(cloudUser.id); return pushSilently(); })
+      ['catch'](function () { GL.cloud.setLastUserId(cloudUser.id); });
+  }
+
+  /* --------------------------------------------------- pantalla de acceso */
+  function renderAuth(step, email) {
+    if (email !== undefined) authEmail = email;
+    var body;
+    if (step === 'code') {
+      body =
+        '<p class="muted">Te mandamos un código de 6 dígitos a<br><b>' + esc(authEmail) + '</b></p>' +
+        '<div class="field"><label for="au-code">Código</label>' +
+        '<input class="input" id="au-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></div>' +
+        '<button class="btn primary block" data-act="auth-verify">Verificar</button>' +
+        '<button class="btn ghost block" data-act="auth-resend" style="margin-top:8px">Reenviar código</button>' +
+        '<button class="btn ghost block" data-act="auth-changeemail" style="margin-top:8px">Usar otro email</button>';
+    } else {
+      body =
+        '<p class="muted">Iniciá sesión con tu email. Te mandamos un código, sin contraseñas — si es la primera vez, la cuenta se crea sola.</p>' +
+        '<div class="field"><label for="au-email">Email</label>' +
+        '<input class="input" type="email" id="au-email" autocomplete="email" placeholder="vos@email.com" value="' + esc(authEmail) + '"></div>' +
+        '<button class="btn primary block" data-act="auth-send">Enviar código</button>';
+    }
+
+    document.getElementById('app').innerHTML =
+      '<div class="authpage"><div class="authcard">' +
+      '<div class="brand">' + icon('barbell') + '<b>GymLog</b></div>' +
+      body +
+      '</div></div>';
+
+    var input = document.getElementById(step === 'code' ? 'au-code' : 'au-email');
+    if (input) setTimeout(function () { input.focus(); }, 60);
   }
 
   /* ------------------------------------------------------- encuesta inicial */
@@ -896,45 +780,6 @@
           });
         });
       }
-    });
-  }
-
-  function openBackups() {
-    store.listBackups().then(function (rows) {
-      var body = rows.length
-        ? '<p style="margin:0;font-size:14px;color:var(--text-dim)">La app guarda una copia al día y otra antes de cada borrado o importación. Se conservan las cinco últimas.</p>' +
-        '<div class="card flush">' + rows.map(function (b) {
-          var d = new Date(b.at);
-          return '<div class="row"><div class="t"><b>' +
-            d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) +
-            '</b><small>' + b.workouts + ' registros · ' + esc(b.reason) + '</small></div>' +
-            '<button class="btn sm ghost" data-restore="' + esc(b.id) + '">Restaurar</button></div>';
-        }).join('') + '</div>'
-        : '<div class="empty">' + icon('shield') + '<h3>Aún no hay copias</h3>' +
-        '<p>Se crean solas en cuanto tengas datos.</p></div>';
-
-      U.openSheet({
-        title: 'Copias automáticas',
-        body: body,
-        onMount: function (sheet) {
-          sheet.addEventListener('click', function (e) {
-            var b = e.target.closest('[data-restore]');
-            if (!b) return;
-            var id = b.getAttribute('data-restore');
-            U.closeSheet();
-            U.confirmDialog({
-              title: 'Restaurar copia',
-              message: 'Se reemplazará todo lo que tengas ahora por el contenido de esa copia. Antes se guardará una copia del estado actual.',
-              confirmLabel: 'Restaurar'
-            }).then(function (ok) {
-              if (!ok) return;
-              store.restoreBackup(id).then(function () {
-                refreshBackups(); render(); U.toast('Copia restaurada', 'ok');
-              })['catch'](function (err) { U.toast(err.message, 'error'); });
-            });
-          });
-        }
-      });
     });
   }
 
@@ -1057,11 +902,42 @@
       }
       case 'units': store.saveSettings({ units: arg('units') }).then(function () { render(); }); break;
       case 'bodygoal': store.saveSettings({ bodyGoal: arg('goal') }).then(function () { render(); }); break;
-      case 'cloud-login': openCloudLogin(); break;
       case 'cloud-logout':
-        GL.cloud.signOut().then(function () { cloudUser = null; render(); U.toast('Sesión cerrada', 'ok'); });
+        clearInterval(dayTickTimer);
+        GL.cloud.signOut().then(function () { cloudUser = null; renderAuth('email', ''); });
         break;
       case 'cloud-sync': cloudSync(); break;
+      case 'auth-send': {
+        var authEmailVal = document.getElementById('au-email').value.trim();
+        if (!/^\S+@\S+\.\S+$/.test(authEmailVal)) { U.toast('Escribí un email válido', 'error'); break; }
+        t.disabled = true; t.textContent = 'Enviando…';
+        GL.cloud.sendCode(authEmailVal).then(function () {
+          renderAuth('code', authEmailVal);
+        })['catch'](function (err) {
+          t.disabled = false; t.textContent = 'Enviar código';
+          U.toast(err.message || 'No se pudo enviar el código', 'error');
+        });
+        break;
+      }
+      case 'auth-verify': {
+        var authCode = document.getElementById('au-code').value.trim();
+        if (!/^\d{6}$/.test(authCode)) { U.toast('El código son 6 números', 'error'); break; }
+        t.disabled = true; t.textContent = 'Verificando…';
+        GL.cloud.verifyCode(authEmail, authCode).then(function () {
+          return refreshCloudSession();
+        }).then(function () {
+          return enterApp();
+        })['catch'](function (err) {
+          t.disabled = false; t.textContent = 'Verificar';
+          U.toast(err.message || 'Código incorrecto', 'error');
+        });
+        break;
+      }
+      case 'auth-resend':
+        GL.cloud.sendCode(authEmail).then(function () { U.toast('Código reenviado', 'ok'); })
+          ['catch'](function (err) { U.toast(err.message || 'No se pudo reenviar', 'error'); });
+        break;
+      case 'auth-changeemail': renderAuth('email', ''); break;
       case 'theme':
         store.saveSettings({ theme: arg('theme') }).then(function (s) { applyTheme(s.theme); render(); });
         break;
@@ -1078,9 +954,6 @@
       case 'replay-intro': replayIntro(); break;
 
       case 'set-goal': openGoal(); break;
-      case 'export': U.closeSheet(); setTimeout(openExport, 0); break;
-      case 'import': openImport(); break;
-      case 'backups': openBackups(); break;
       case 'share-month': shareMonth(arg('month')); break;
 
       case 'seed-demo':
@@ -1193,101 +1066,114 @@
       '<div class="toast-wrap" id="toasts"></div>';
   }
 
+  /* eventos globales por delegación: valen tanto para la pantalla de acceso
+     como para la app, así que se enganchan una sola vez, antes de saber si
+     hay sesión. */
+  function wireGlobalEvents() {
+    document.addEventListener('click', onClick);
+
+    /* buscador del historial: se escribe y se vuelve a pintar sin perder el foco */
+    var qTimer = null;
+    document.addEventListener('input', function (e) {
+      var el = e.target.closest && e.target.closest('[data-live="query"]');
+      if (!el) return;
+      state.query = el.value;
+      clearTimeout(qTimer);
+      qTimer = setTimeout(function () { render('hist-q'); }, 260);
+    });
+
+    /* campos de ajustes: se guardan al salir del campo */
+    document.addEventListener('change', function (e) {
+      var el = e.target.closest && e.target.closest('[data-set]');
+      if (!el) return;
+      var key = el.getAttribute('data-set');
+      var value = el.value;
+      if (key === 'startDate') {
+        if (!value) { el.value = store.settings().startDate || S.today(); return; }
+        if (S.daysBetween(value, S.today()) < 0) {
+          U.toast('La fecha no puede estar en el futuro', 'error');
+          el.value = store.settings().startDate || S.today();
+          return;
+        }
+      }
+      if (key === 'goal') {
+        var n = parseInt(value, 10);
+        if (!(n >= 1 && n <= 31)) { U.toast('Entre 1 y 31', 'error'); el.value = store.settings().goal; return; }
+        value = n;
+      }
+      if (key === 'backfillDays') {
+        var b = parseInt(value, 10);
+        if (!(b >= 0 && b <= 60)) { U.toast('Entre 0 y 60 días', 'error'); el.value = store.settings().backfillDays; return; }
+        value = b;
+      }
+      if (key === 'name') value = value.trim() || 'Simón';
+      if (key === 'age') {
+        if (value === '') value = null;
+        else {
+          var ageN = parseInt(value, 10);
+          if (!(ageN >= 10 && ageN <= 100)) { U.toast('Entre 10 y 100 años', 'error'); el.value = store.settings().age == null ? '' : store.settings().age; return; }
+          value = ageN;
+        }
+      }
+      if (key === 'heightCm') {
+        if (value === '') value = null;
+        else {
+          var hN = parseInt(value, 10);
+          if (!(hN >= 100 && hN <= 250)) { U.toast('Entre 100 y 250 cm', 'error'); el.value = store.settings().heightCm == null ? '' : store.settings().heightCm; return; }
+          value = hN;
+        }
+      }
+      var patch = {}; patch[key] = value;
+      store.saveSettings(patch).then(function () { render(); U.toast('Guardado', 'ok'); });
+    });
+
+    window.addEventListener('scroll', function () {
+      var tb = document.getElementById('topbar');
+      if (tb) tb.classList.toggle('is-scrolled', window.scrollY > 4);
+    }, { passive: true });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && U.isSheetOpen()) U.closeSheet();
+    });
+  }
+
+  /* se llama una vez confirmada la sesión: trae los datos de la cuenta y
+     recién ahí pinta la app de verdad. */
+  function enterApp() {
+    return resolveAccountData().then(function () {
+      buildShell();
+      state.selected = S.today();
+      render();
+      document.getElementById('fab').addEventListener('click', function () { openForm(S.today(), null); });
+
+      var introStillPlaying = !!document.getElementById('boot');
+      setTimeout(maybeOpenOnboarding, introStillPlaying ? INTRO_MS + 400 : 500);
+
+      var lastDay = S.today();
+      clearInterval(dayTickTimer);
+      dayTickTimer = setInterval(function () {
+        if (S.today() !== lastDay) { lastDay = S.today(); render(); }
+      }, 60000);
+
+      syncAchievements(false);
+    });
+  }
+
   function start() {
     bootTheme = document.documentElement.getAttribute('data-theme');
     var bootEl = document.getElementById('boot');
     if (bootEl) introTemplate = bootEl.outerHTML;
     probeSaver();
+    wrapStoreForAutoSync();
 
     store.init().then(function () {
       applyTheme(store.settings().theme);
-      return Promise.all([refreshBackups(), refreshCloudSession()]);
+      return refreshCloudSession();
     }).then(function () {
-      buildShell();
-      state.selected = S.today();
-      render();
-
-      setTimeout(maybeOpenOnboarding, store.settings().intro ? INTRO_MS + 400 : 500);
-
-      document.addEventListener('click', onClick);
-      document.getElementById('fab').addEventListener('click', function () { openForm(S.today(), null); });
-
-      /* buscador del historial: se escribe y se vuelve a pintar sin perder el foco */
-      var qTimer = null;
-      document.addEventListener('input', function (e) {
-        var el = e.target.closest && e.target.closest('[data-live="query"]');
-        if (!el) return;
-        state.query = el.value;
-        clearTimeout(qTimer);
-        qTimer = setTimeout(function () { render('hist-q'); }, 260);
-      });
-
-      /* campos de ajustes: se guardan al salir del campo */
-      document.addEventListener('change', function (e) {
-        var el = e.target.closest && e.target.closest('[data-set]');
-        if (!el) return;
-        var key = el.getAttribute('data-set');
-        var value = el.value;
-        if (key === 'startDate') {
-          if (!value) { el.value = store.settings().startDate || S.today(); return; }
-          if (S.daysBetween(value, S.today()) < 0) {
-            U.toast('La fecha no puede estar en el futuro', 'error');
-            el.value = store.settings().startDate || S.today();
-            return;
-          }
-        }
-        if (key === 'goal') {
-          var n = parseInt(value, 10);
-          if (!(n >= 1 && n <= 31)) { U.toast('Entre 1 y 31', 'error'); el.value = store.settings().goal; return; }
-          value = n;
-        }
-        if (key === 'backfillDays') {
-          var b = parseInt(value, 10);
-          if (!(b >= 0 && b <= 60)) { U.toast('Entre 0 y 60 días', 'error'); el.value = store.settings().backfillDays; return; }
-          value = b;
-        }
-        if (key === 'name') value = value.trim() || 'Simón';
-        if (key === 'age') {
-          if (value === '') value = null;
-          else {
-            var ageN = parseInt(value, 10);
-            if (!(ageN >= 10 && ageN <= 100)) { U.toast('Entre 10 y 100 años', 'error'); el.value = store.settings().age == null ? '' : store.settings().age; return; }
-            value = ageN;
-          }
-        }
-        if (key === 'heightCm') {
-          if (value === '') value = null;
-          else {
-            var hN = parseInt(value, 10);
-            if (!(hN >= 100 && hN <= 250)) { U.toast('Entre 100 y 250 cm', 'error'); el.value = store.settings().heightCm == null ? '' : store.settings().heightCm; return; }
-            value = hN;
-          }
-        }
-        var patch = {}; patch[key] = value;
-        store.saveSettings(patch).then(function () { render(); U.toast('Guardado', 'ok'); });
-      });
-
-      window.addEventListener('scroll', function () {
-        var tb = document.getElementById('topbar');
-        if (tb) tb.classList.toggle('is-scrolled', window.scrollY > 4);
-      }, { passive: true });
-
-      document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && U.isSheetOpen()) U.closeSheet();
-      });
-
-      var lastDay = S.today();
-      setInterval(function () {
-        if (S.today() !== lastDay) { lastDay = S.today(); render(); }
-      }, 60000);
-
+      wireGlobalEvents();
       scheduleIntroExit();
-      syncAchievements(false);
-
-      /* copia automática diaria, en segundo plano */
-      setTimeout(function () {
-        store.autoBackup().then(function (b) { if (b) refreshBackups(); });
-      }, 2500);
+      if (!cloudUser) { renderAuth('email', ''); return; }
+      return enterApp();
     })['catch'](function (err) {
       var boot = document.getElementById('boot');
       if (boot) {

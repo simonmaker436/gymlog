@@ -1407,3 +1407,44 @@ button.row:hover { background: var(--surface-2); }
 :root.no-intro .intro-bar { animation: logo-breathe 1.4s ease-in-out infinite; }
 :root.no-intro .intro-mark { animation: none; opacity: 1; }
 @keyframes logo-breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .6; transform: scale(.94); } }
+
+/* ============================================================== AUTH ==== */
+.authpage {
+  min-height: 100dvh;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.authcard {
+  width: 100%;
+  max-width: 360px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 28px 22px;
+}
+.authcard .brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-bottom: 24px;
+}
+.authcard .brand .ic { width: 24px; height: 24px; color: var(--accent); stroke-width: 2.2; }
+.authcard .brand b {
+  font-family: var(--font-cond);
+  font-weight: 800;
+  font-size: 21px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.authcard p.muted {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: center;
+}
+.authcard .field { margin-bottom: 16px; }

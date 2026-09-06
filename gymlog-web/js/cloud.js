@@ -77,8 +77,18 @@
     }).then(function (r) { if (r.error) throw new Error(friendlyError(r.error)); return r.data || null; });
   }
 
+  var LAST_USER_KEY = 'gymlog:lastCloudUser';
+  function lastUserId() {
+    try { return localStorage.getItem(LAST_USER_KEY); } catch (e) { return null; }
+  }
+  function setLastUserId(id) {
+    try { localStorage.setItem(LAST_USER_KEY, id); } catch (e) { }
+  }
+
   GL.cloud = {
     ready: function () { return !!sb(); },
+    lastUserId: lastUserId,
+    setLastUserId: setLastUserId,
     session: session,
     sendCode: sendCode,
     verifyCode: verifyCode,
