@@ -1,5 +1,5 @@
 /* Service worker: guarda la app en caché para que funcione sin conexión. */
-var CACHE = 'gymlog-v2';
+var CACHE = 'gymlog-v3';
 var ASSETS = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ var ASSETS = [
   './js/ui.js',
   './js/views.js',
   './js/app.js',
+  './js/cloud.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png'
