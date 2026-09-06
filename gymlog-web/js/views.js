@@ -32,6 +32,24 @@
       '</div>';
   }
 
+  /* Barra de la meta semanal. Pasada la meta sigue creciendo hasta el borde,
+     pero en verde: cumplida es cumplida, lo de más es de más. */
+  function weeklyGoalBar(count, target) {
+    var pct = target > 0 ? Math.min(100, Math.round((count / target) * 100)) : 0;
+    var hit = count >= target;
+    var left = Math.max(0, target - count);
+    return '<div class="wgoal' + (hit ? ' is-hit' : '') + '">' +
+      '<div class="wgoal-top">' +
+      '<span class="eyebrow">Meta semanal</span>' +
+      '<span class="wgoal-n"><b>' + count + '</b> / ' + target + '</span>' +
+      '</div>' +
+      '<span class="wgoal-track"><span class="wgoal-fill" style="width:' + pct + '%"></span></span>' +
+      '<div class="wgoal-foot">' + (hit
+        ? (count > target ? 'Meta cumplida, y ' + (count - target) + ' de propina.' : 'Meta cumplida.')
+        : 'Te ' + (left === 1 ? 'queda 1 sesión' : 'quedan ' + left + ' sesiones') + ' esta semana.') +
+      '</div></div>';
+  }
+
   function sectionTitle(t, right) {
     return '<div class="section-title"><h2>' + esc(t) + '</h2><span class="spacer"></span>' +
       (right || '') + '</div>';
@@ -165,6 +183,7 @@
       '<div class="card-head"><h3>Esta semana</h3><span class="spacer"></span>' +
       '<span class="muted" style="font-size:12.5px">' + esc(S.formatShort(week.start)) + ' – ' + esc(S.formatShort(week.end)) + '</span></div>' +
       weekDots(ctx, ctx.today) +
+      weeklyGoalBar(week.count, GL.store.weeklyTarget(ctx.settings)) +
       '<div style="display:flex;gap:22px;margin-top:16px;flex-wrap:wrap">' +
       '<div><span class="eyebrow">Sesiones</span><div class="num" style="font-size:30px;line-height:1;margin-top:6px">' +
       week.count + '<span class="muted" style="font-size:17px"> / ' + week.scheduledTotal + '</span></div></div>' +
@@ -546,52 +565,134 @@
       tile('Dificultad', fmtAvg(o.difficulty)) +
       '</div>';
 
+    html += sectionTitle('Récords');
+    html += recordCards(ctx);
+
     html += sectionTitle('Resumen del mes');
     html += monthCard(ctx, S.monthKey(ctx.today));
     return html;
   }
 
+  /* ------------------------------------------------------------- récords
+     Cada marca con la fecha en que se consiguió. Nada de pesos por
+     ejercicio: acá se mide constancia y tiempo. */
+  function recordCards(ctx) {
+    var rec = S.records(ctx.workouts, ctx.settings.gymDays, ctx.today, ctx.start, ctx.win);
+
+    function card(ico, label, value, when) {
+      return '<div class="rcard' + (when ? '' : ' is-empty') + '">' +
+        '<span class="rcard-ic">' + icon(ico) + '</span>' +
+        '<span class="k">' + esc(label) + '</span>' +
+        '<div class="v">' + value + '</div>' +
+        '<div class="w">' + (when || 'sin datos todavía') + '</div>' +
+        '</div>';
+    }
+
+    var streakWhen = null;
+    if (rec.bestStreak && rec.bestStreakStart) {
+      streakWhen = rec.bestStreakEnd && rec.bestStreakEnd !== rec.bestStreakStart
+        ? esc(S.formatShort(rec.bestStreakStart)) + ' – ' + esc(S.formatShort(rec.bestStreakEnd))
+        : 'desde el ' + esc(S.formatShort(rec.bestStreakStart));
+    }
+
+    return '<div class="rcards">' +
+      card('clock', 'Sesión más larga',
+        rec.longestSession ? S.formatDuration(rec.longestSession.duration) : '—',
+        rec.longestSession ? esc(S.capitalize(S.formatLong(rec.longestSession.date))) : null) +
+      card('bolt', 'Mejor racha',
+        rec.bestStreak ? rec.bestStreak + '<small> días</small>' : '—',
+        streakWhen) +
+      card('calendarCheck', 'Mejor mes',
+        rec.bestMonth ? rec.bestMonth.count + '<small> sesiones</small>' : '—',
+        rec.bestMonth ? esc(S.capitalize(S.formatMonth(rec.bestMonth.key))) : null) +
+      card('chartUp', 'Mejor semana',
+        rec.bestWeek ? S.formatDuration(rec.bestWeek.minutes) : '—',
+        rec.bestWeek ? 'semana del ' + esc(S.formatShort(rec.bestWeek.start)) : null) +
+      '</div>';
+  }
+
+  /* --------------------------------------------------- mapa de calor anual
+     Un año entero en columnas de semanas, al estilo del de GitHub. El verde
+     sube de intensidad con la duración de la sesión; los días programados a
+     los que faltaste quedan en rojo apagado. En pantallas estrechas el mapa
+     se desplaza de lado dentro de su caja, sin encoger las casillas hasta
+     volverlas ilegibles. */
+  function yearHeat(ctx) {
+    var years = S.yearsWithData(ctx.workouts);
+    var year = ctx.state.heatYear || years[0];
+    if (years.indexOf(year) < 0) year = years[0];
+
+    var hm = S.yearHeatmap(ctx.workouts, ctx.settings.gymDays, year, ctx.today, ctx.start, ctx.win);
+    var i = years.indexOf(year);
+    var older = years[i + 1];          // los años vienen de mayor a menor
+    var newer = years[i - 1];
+
+    /* Etiquetas de mes: una sola por mes, ocupando tantas columnas como
+       semanas tenga. Poniendo una etiqueta por columna se pisaban entre
+       ellas, porque cada columna mide 11px y «ENE» necesita bastante más. */
+    var cols = [];
+    for (var k = 0; k < hm.cells.length; k += 7) cols.push(hm.cells.slice(k, k + 7));
+    var groups = [], lastM = -1;
+    cols.forEach(function (col) {
+      /* el mes de media columna manda: así una semana a caballo entre dos
+         meses se cuenta en el que ocupa la mayor parte */
+      var m = (col[3] || col[0]).month;
+      var inYear = col.some(function (c) { return c.inYear; });
+      if (!inYear) { groups.push({ m: null, n: 1 }); lastM = -1; return; }
+      if (m !== lastM) { groups.push({ m: m, n: 1 }); lastM = m; }
+      else groups[groups.length - 1].n++;
+    });
+
+    var body = '<div class="heat-scroll"><div class="heat-inner">' +
+      '<div class="heat-months year">' + groups.map(function (g2) {
+        /* con menos de dos columnas no entra el nombre sin pisar al vecino */
+        return '<span style="grid-column:span ' + g2.n + '">' +
+          (g2.m != null && g2.n >= 2 ? esc(S.MONTHS_SHORT[g2.m]) : '') + '</span>';
+      }).join('') + '</div>' +
+      '<div class="heat year">' + hm.cells.map(function (c) {
+        var cls;
+        if (!c.inYear) cls = 'o';
+        else if (c.went) cls = 'd l' + c.level;
+        else if (c.status === 'missed') cls = 'm';
+        else if (c.status === 'open') cls = 'k';
+        else cls = '';
+        var t = S.capitalize(S.formatLong(c.date)) +
+          (c.went ? ' · ' + S.formatDuration(c.duration || 0)
+            : c.status === 'missed' ? ' · no fuiste'
+              : c.status === 'open' ? ' · sin cerrar' : '');
+        return '<i class="' + cls + '" title="' + esc(t) + '"></i>';
+      }).join('') + '</div>' +
+      '</div></div>';
+
+    return '<div class="card">' +
+      '<div class="card-head"><h3>' + year + '</h3><span class="spacer"></span>' +
+      '<div class="heat-nav">' +
+      '<button class="iconbtn sm" data-act="heat-year" data-year="' + (older || '') + '"' +
+      (older ? '' : ' disabled') + ' aria-label="Año anterior">' + icon('left') + '</button>' +
+      '<button class="iconbtn sm" data-act="heat-year" data-year="' + (newer || '') + '"' +
+      (newer ? '' : ' disabled') + ' aria-label="Año siguiente">' + icon('right') + '</button>' +
+      '</div></div>' +
+      '<p class="muted" style="margin:-4px 0 12px;font-size:12.5px">' +
+      hm.count + (hm.count === 1 ? ' sesión' : ' sesiones') +
+      (hm.minutes ? ' · ' + S.formatDuration(hm.minutes) : '') + '</p>' +
+      body +
+      '<div class="heat-legend">' +
+      '<span class="muted">Menos</span>' +
+      '<i class="hl"></i><i class="hl l1"></i><i class="hl l2"></i><i class="hl l3"></i><i class="hl l4"></i>' +
+      '<span class="muted">Más</span>' +
+      '<span class="spacer"></span>' +
+      '<i class="hl miss"></i><span class="muted">No fui</span>' +
+      '</div>' +
+      '</div>';
+  }
+
   /* ------------------------------------------------------------- análisis */
   function analysis(ctx) {
     var g = ctx.settings.gymDays;
-    var weeks = 26;
-    var cells = S.heatmap(ctx.workouts, g, weeks, ctx.today, ctx.start, ctx.win);
     var wd = S.byWeekday(ctx.workouts, g, ctx.today, ctx.start, ctx.win);
     var ins = S.insights(ctx.workouts, g, ctx.today, ctx.start, ctx.settings.units, ctx.win);
-    var rec = S.records(ctx.workouts, g, ctx.today, ctx.start, ctx.win);
 
-    /* etiquetas de mes alineadas con las columnas de semanas */
-    var cols = [];
-    for (var i = 0; i < cells.length; i += 7) cols.push(cells.slice(i, i + 7));
-    var labels = [], lastM = -1;
-    cols.forEach(function (col) {
-      var m = col[3] ? col[3].month : col[0].month;
-      if (m !== lastM) { labels.push({ m: m, n: 1 }); lastM = m; }
-      else labels[labels.length - 1].n++;
-    });
-
-    var html = '<div class="card">' +
-      '<div class="card-head"><h3>Últimos 6 meses</h3><span class="spacer"></span>' +
-      '<span class="muted" style="font-size:12px">' + S.done(ctx.workouts).length + ' sesiones</span></div>' +
-      '<div class="heat-wrap">' +
-      '<div class="heat-months">' + labels.map(function (l) {
-        return '<span style="flex:' + l.n + ' 0 0">' + (l.n >= 2 ? S.MONTHS_SHORT[l.m] : '') + '</span>';
-      }).join('') + '</div>' +
-      '<div class="heat">' + cells.map(function (c) {
-        var cls = c.status === 'done' || c.status === 'extra' ? 'd'
-          : c.status === 'missed' ? 'm'
-            : c.status === 'open' ? 'k'
-              : c.status === 'pending' ? 'p'
-                : c.status === 'future' || c.outside ? 'o' : '';
-        return '<i class="' + cls + '" title="' + esc(S.formatLong(c.date)) + '"></i>';
-      }).join('') + '</div>' +
-      '</div>' +
-      '<div class="legend" style="margin-top:12px">' +
-      '<span>' + mark('done') + 'Fui</span>' +
-      '<span>' + mark('missed') + 'No fui</span>' +
-      '<span>' + mark('open') + 'Sin cerrar</span>' +
-      '</div>' +
-      '</div>';
+    var html = yearHeat(ctx);
 
     if (wd.length) {
       html += sectionTitle('Constancia por día');
@@ -614,19 +715,13 @@
       }).join('') + '</div>';
     }
 
-    html += sectionTitle('Marcas personales');
+    /* Las marcas grandes (sesión más larga, mejor racha, mejor mes, mejor
+       semana) están como tarjetas en Resumen. Acá quedan las dos que no
+       entraban ahí, para no repetir lo mismo en dos pestañas. */
+    var rec = S.records(ctx.workouts, g, ctx.today, ctx.start, ctx.win);
+    html += sectionTitle('Otras marcas');
     html += '<div class="card flush">' +
-      recordRow('bolt', 'Mejor racha', 'días programados seguidos', String(rec.bestStreak)) +
       recordRow('week', 'Semanas al 100%', rec.perfectWeeksTotal + ' en total', String(rec.perfectWeeks)) +
-      recordRow('calendarCheck', 'Mejor mes',
-        rec.bestMonth ? S.formatMonth(rec.bestMonth.key) : 'sin datos',
-        rec.bestMonth ? String(rec.bestMonth.count) : '—') +
-      recordRow('clock', 'Sesión más larga',
-        rec.longestSession ? S.formatLong(rec.longestSession.date) : 'sin datos',
-        rec.longestSession ? S.formatDuration(rec.longestSession.duration) : '—') +
-      recordRow('chartUp', 'Mejor semana',
-        rec.bestWeek ? 'semana del ' + S.formatShort(rec.bestWeek.start) : 'sin datos',
-        rec.bestWeek ? S.formatDuration(rec.bestWeek.minutes) : '—') +
       recordRow('trophy', 'Tiempo total', 'desde el ' + (ctx.eff ? S.formatShort(ctx.eff) : '—'), S.formatDuration(rec.totalMinutes)) +
       '</div>';
 
@@ -880,6 +975,11 @@
       '<input class="input" type="number" id="set-goal" data-set="goal" min="1" max="31" value="' + s.goal + '">' +
       '<span class="hint">Sesiones al mes. Con tus días programados salen unas ' +
       Math.round(s.gymDays.length * 4.33) + '.</span></div>' +
+      '<div class="field"><label for="set-weekly">Meta semanal</label>' +
+      '<input class="input" type="number" id="set-weekly" data-set="weeklyGoal" min="1" max="14" ' +
+      'placeholder="' + GL.store.weeklyTarget(s) + '" value="' + (s.weeklyGoal == null ? '' : s.weeklyGoal) + '">' +
+      '<span class="hint">Sesiones por semana, la barra de Inicio. Si lo dejás vacío usa tus días ' +
+      'programados (' + GL.store.weeklyTarget(s) + ').</span></div>' +
       '<div class="field"><label for="set-age">Edad</label>' +
       '<input class="input" type="number" id="set-age" data-set="age" min="10" max="100" value="' + (s.age == null ? '' : s.age) + '"></div>' +
       '<div class="field"><label for="set-height">Altura (cm)</label>' +

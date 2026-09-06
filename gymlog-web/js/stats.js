@@ -172,7 +172,7 @@
 
   function streaks(workouts, gymDays, ref, startDate, windowDays) {
     ref = ref || today();
-    var res = { current: 0, best: 0, currentStart: null };
+    var res = { current: 0, best: 0, currentStart: null, bestStart: null, bestEnd: null };
     var first = effectiveStart(startDate, workouts);
     if (!first || !gymDays.length) return res;
 
@@ -197,14 +197,25 @@
     res.current = run;
     res.currentStart = runStart;
 
-    var best = 0, acc = 0;
+    /* La mejor racha guarda también entre qué fechas ocurrió, para poder
+       decir «cuándo» en las marcas personales. */
+    var best = 0, acc = 0, accStart = null;
     for (var j = 0; j < days.length; j++) {
       var dd = days[j], rec = map[dd];
-      if (rec && rec.went) { acc++; if (acc > best) best = acc; }
+      if (rec && rec.went) {
+        if (!acc) accStart = dd;
+        acc++;
+        if (acc > best) { best = acc; res.bestStart = accStart; res.bestEnd = dd; }
+      }
       else if (unresolved(dd)) { /* sin resolver: no rompe */ }
-      else acc = 0;
+      else { acc = 0; accStart = null; }
     }
     res.best = Math.max(best, res.current);
+    /* Si la racha viva es la mejor, sus fechas mandan. */
+    if (res.current >= best && res.current > 0) {
+      res.bestStart = res.currentStart;
+      res.bestEnd = days.length ? days[days.length - 1] : null;
+    }
     return res;
   }
 
@@ -569,6 +580,85 @@
     return cells;
   }
 
+  /* ------------------------------------------------- mapa de calor anual
+     Un año entero, en columnas de semanas como el de GitHub. La primera
+     columna arranca en el domingo anterior al 1 de enero y la última termina
+     en el sábado siguiente al 31 de diciembre, para que todas las columnas
+     tengan sus siete casillas.
+
+     `level` (0-4) es la intensidad del verde. Se reparte por duración
+     comparando con las sesiones del propio año: quien entrena 40 minutos ve
+     su escala, y quien entrena 90 ve la suya. Sin duraciones útiles, todas
+     las sesiones quedan en el nivel 3, o sea marcado/no marcado. */
+  function yearHeatmap(workouts, gymDays, year, ref, startDate, windowDays) {
+    ref = ref || today();
+    var eff = effectiveStart(startDate, workouts);
+    var map = index(workouts);
+
+    var jan1 = year + '-01-01', dec31 = year + '-12-31';
+    var start = weekStart(jan1);
+    var end = addDays(weekStart(dec31), 6);
+
+    /* Umbrales: los cuartiles de las duraciones registradas ese año. */
+    var mins = [];
+    Object.keys(map).forEach(function (d) {
+      var w = map[d];
+      if (d.slice(0, 4) === String(year) && w.went && w.duration > 0) mins.push(w.duration);
+    });
+    mins.sort(function (a, b) { return a - b; });
+    var cuts = null;
+    if (mins.length >= 4) {
+      var q = function (p) { return mins[Math.min(mins.length - 1, Math.floor(mins.length * p))]; };
+      cuts = [q(0.25), q(0.5), q(0.75)];
+      // si todas duran lo mismo, los cortes no separan nada
+      if (cuts[0] === cuts[2]) cuts = null;
+    }
+
+    var cells = [], cur = start, count = 0, minutes = 0;
+    while (daysBetween(cur, end) >= 0) {
+      var inYear = cur.slice(0, 4) === String(year);
+      var w = map[cur];
+      var future = daysBetween(ref, cur) > 0;
+      var level = 0;
+
+      /* Solo cuentan los días del año: las columnas de los extremos arrastran
+         días de diciembre anterior y de enero siguiente para completar la
+         semana, y esos no son de este año. */
+      if (w && w.went && inYear) {
+        count++;
+        minutes += w.duration || 0;
+        if (!cuts || !w.duration) level = 3;
+        else level = w.duration <= cuts[0] ? 1 : w.duration <= cuts[1] ? 2 : w.duration <= cuts[2] ? 3 : 4;
+      }
+
+      cells.push({
+        date: cur,
+        inYear: inYear,
+        level: inYear ? level : 0,
+        went: !!(w && w.went),
+        duration: w ? w.duration : null,
+        /* fuera del año, ya pasado o antes de empezar a registrar: sin estado */
+        status: !inYear ? 'out'
+          : future ? 'future'
+            : (eff && daysBetween(cur, eff) > 0) ? 'out'
+              : dayStatus(cur, map, gymDays, ref, eff, windowDays),
+        month: Number(cur.slice(5, 7)) - 1
+      });
+      cur = addDays(cur, 1);
+    }
+    return { cells: cells, year: year, count: count, minutes: minutes, graded: !!cuts };
+  }
+
+  /* Los años que tienen al menos una sesión, de mayor a menor. */
+  function yearsWithData(workouts) {
+    var seen = {};
+    done(workouts).forEach(function (w) { seen[w.date.slice(0, 4)] = true; });
+    var ys = Object.keys(seen).map(Number).sort(function (a, b) { return b - a; });
+    var thisYear = Number(today().slice(0, 4));
+    if (ys.indexOf(thisYear) < 0) ys.unshift(thisYear);
+    return ys;
+  }
+
   /* Marcas personales. Nada de pesos: constancia. */
   function records(workouts, gymDays, ref, startDate, windowDays) {
     ref = ref || today();
@@ -601,6 +691,8 @@
 
     return {
       bestStreak: st.best,
+      bestStreakStart: st.bestStart,
+      bestStreakEnd: st.bestEnd,
       currentStreak: st.current,
       perfectWeeks: pw.best,
       perfectWeeksTotal: pw.total,
@@ -765,6 +857,7 @@
     overall: overall, nextGymDay: nextGymDay, calendarGrid: calendarGrid,
     firstDate: firstDate,
     perfectWeeks: perfectWeeks, byWeekday: byWeekday, rollingWeeks: rollingWeeks,
-    heatmap: heatmap, records: records, insights: insights, typicalWorkout: typicalWorkout
+    heatmap: heatmap, yearHeatmap: yearHeatmap, yearsWithData: yearsWithData,
+    records: records, insights: insights, typicalWorkout: typicalWorkout
   };
 });

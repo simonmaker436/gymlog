@@ -603,6 +603,142 @@ main {
 }
 .heat-months span { overflow: hidden; }
 
+/* --------------- variante anual: casilla fija y desplazamiento lateral */
+.heat-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  margin: 0 -2px;
+  padding: 0 2px 4px;
+}
+.heat-inner { min-width: min-content; }
+.heat.year {
+  grid-auto-columns: 11px;
+  gap: 3px;
+}
+.heat.year i { width: 11px; height: 11px; aspect-ratio: auto; border-radius: 2px; }
+
+/* cinco pasos de verde: sin sesión, y de la más corta a la más larga */
+.heat.year i.d { background: color-mix(in srgb, var(--good) 26%, var(--surface-2)); border-color: transparent; }
+.heat.year i.d.l2 { background: color-mix(in srgb, var(--good) 48%, var(--surface-2)); }
+.heat.year i.d.l3 { background: color-mix(in srgb, var(--good) 72%, var(--surface-2)); }
+.heat.year i.d.l4 { background: var(--good); }
+
+.heat-months.year {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 11px;
+  gap: 3px;
+  margin-bottom: 5px;
+}
+.heat-months.year span { white-space: nowrap; overflow: hidden; text-overflow: clip; }
+
+.heat-nav { display: flex; gap: 6px; }
+.iconbtn.sm { width: 30px; height: 30px; }
+.iconbtn.sm .ic { width: 15px; height: 15px; }
+.iconbtn[disabled] { opacity: .3; pointer-events: none; }
+
+.heat-legend {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.heat-legend .spacer { flex: 1; }
+.heat-legend .hl {
+  width: 11px; height: 11px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  display: block; flex: none;
+}
+.heat-legend .hl.l1 { background: color-mix(in srgb, var(--good) 26%, var(--surface-2)); border-color: transparent; }
+.heat-legend .hl.l2 { background: color-mix(in srgb, var(--good) 48%, var(--surface-2)); border-color: transparent; }
+.heat-legend .hl.l3 { background: color-mix(in srgb, var(--good) 72%, var(--surface-2)); border-color: transparent; }
+.heat-legend .hl.l4 { background: var(--good); border-color: transparent; }
+.heat-legend .hl.miss { background: var(--miss-soft); border-color: color-mix(in srgb, var(--miss) 45%, transparent); }
+
+/* ------------------------------------------------ tarjetas de récord */
+.rcards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.rcard {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  padding: 13px 13px 14px;
+  min-width: 0;
+}
+.rcard-ic {
+  position: absolute; top: 11px; right: 11px;
+  color: var(--border-strong);
+  line-height: 0;
+}
+.rcard-ic .ic { width: 16px; height: 16px; }
+.rcard .k {
+  display: block;
+  font-family: var(--font-cond);
+  font-size: 11.5px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text-muted);
+  padding-right: 22px;
+}
+.rcard .v {
+  font-family: var(--font-cond);
+  font-weight: 800;
+  font-size: clamp(21px, 6vw, 27px);
+  line-height: 1;
+  margin-top: 9px;
+  color: var(--accent);
+}
+.rcard .v small {
+  font-size: 13px; font-weight: 700; letter-spacing: .04em;
+  color: var(--text-muted);
+}
+.rcard .w {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  line-height: 1.35;
+}
+.rcard.is-empty .v { color: var(--text-muted); }
+
+/* ------------------------------------------- barra de la meta semanal */
+.wgoal { margin-top: 16px; }
+.wgoal-top { display: flex; align-items: baseline; gap: 8px; }
+.wgoal-top .eyebrow { flex: 1; }
+.wgoal-n {
+  font-family: var(--font-cond);
+  font-size: 14px; font-weight: 700; letter-spacing: .06em;
+  color: var(--text-muted);
+}
+.wgoal-n b { font-size: 18px; color: var(--text); }
+.wgoal-track {
+  display: block;
+  height: 8px;
+  margin-top: 8px;
+  background: var(--surface-3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.wgoal-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width .35s cubic-bezier(.2, .8, .3, 1);
+}
+.wgoal.is-hit .wgoal-fill { background: var(--good); }
+.wgoal.is-hit .wgoal-n b { color: var(--good); }
+.wgoal-foot {
+  margin-top: 7px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
 /* ------------------------------------------------------- anillo de meta */
 .goal { display: flex; align-items: center; gap: 16px; }
 .goal .ring { width: 92px; height: 92px; flex: none; position: relative; }

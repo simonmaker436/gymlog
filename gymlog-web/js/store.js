@@ -162,6 +162,7 @@
     gymDays: [2, 3, 5],       // 0=domingo … 2=martes, 3=miércoles, 5=viernes
     startDate: null,          // desde cuándo cuentan las estadísticas
     goal: 12,                 // objetivo de entrenamientos al mes
+    weeklyGoal: null,         // meta semanal; null = tantos como días programados
     backfillDays: 7,          // cuántos días atrás se puede rellenar una sesión
     intro: true,              // la animación "LOCK IN" al abrir
     lastExport: null,         // fecha de la última copia que te llevaste
@@ -229,7 +230,20 @@
     if (!BODY_GOALS.some(function (g) { return g.key === out.bodyGoal; })) out.bodyGoal = null;
     if (out.lastSync && isNaN(Date.parse(out.lastSync))) out.lastSync = null;
 
+    /* null a propósito: significa «los que tenga programados», así la meta
+       sigue sola a los días de gimnasio hasta que se fije un número. */
+    if (out.weeklyGoal != null) {
+      var wg = Math.round(Number(out.weeklyGoal));
+      out.weeklyGoal = (isNaN(wg) || wg < 1 || wg > 14) ? null : wg;
+    }
+
     return out;
+  }
+
+  /* Meta semanal efectiva: la fijada, o los días programados. */
+  function weeklyTarget(s) {
+    if (s.weeklyGoal != null) return s.weeklyGoal;
+    return Math.max(1, s.gymDays.length || 3);
   }
 
   /* ------------------------------------------------------- estado en RAM */
@@ -674,6 +688,7 @@
     },
 
     uid: uid,
+    weeklyTarget: weeklyTarget,
     DEFAULT_SETTINGS: DEFAULT_SETTINGS,
     BODY_GOALS: BODY_GOALS
   };

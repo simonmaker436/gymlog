@@ -21,6 +21,7 @@
     filter: '3m',
     sort: 'new',
     progressTab: 'resumen',
+    heatYear: null,          // null = el año con datos más reciente
     histMode: 'all',
     query: '',
     measureField: null
@@ -1052,6 +1053,11 @@
       case 'filter': state.filter = arg('filter'); render(); break;
       case 'sort': state.sort = state.sort === 'new' ? 'old' : 'new'; render(); break;
       case 'ptab': state.progressTab = arg('tab'); render(); break;
+      case 'heat-year': {
+        var y = parseInt(arg('year'), 10);
+        if (y) { state.heatYear = y; render(); }
+        break;
+      }
       case 'histmode': state.histMode = arg('mode'); render(); break;
 
       case 'toggle-day': {
@@ -1274,6 +1280,20 @@
         var n = parseInt(value, 10);
         if (!(n >= 1 && n <= 31)) { U.toast('Entre 1 y 31', 'error'); el.value = store.settings().goal; return; }
         value = n;
+      }
+      if (key === 'weeklyGoal') {
+        /* vacío es válido y significa «los días que tenga programados» */
+        if (value === '') value = null;
+        else {
+          var wk = parseInt(value, 10);
+          if (!(wk >= 1 && wk <= 14)) {
+            U.toast('Entre 1 y 14, o vacío', 'error');
+            var cur = store.settings().weeklyGoal;
+            el.value = cur == null ? '' : cur;
+            return;
+          }
+          value = wk;
+        }
       }
       if (key === 'backfillDays') {
         var b = parseInt(value, 10);
