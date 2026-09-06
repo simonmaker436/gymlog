@@ -4,7 +4,7 @@
      1. VERSION acá abajo
      2. el ?v= de los <script>/<link> en index.html
    Si solo se sube una, el navegador puede quedarse con la mezcla vieja. */
-var VERSION = '7';
+var VERSION = '8';
 var CACHE = 'gymlog-v' + VERSION;
 
 var ASSETS = [
@@ -62,10 +62,15 @@ self.addEventListener('fetch', function (e) {
   var req = e.request;
   if (req.method !== 'GET') return;
 
-  // navegación: intenta red, cae a la copia guardada
+  /* Navegación: intenta red, cae a la copia guardada.
+
+     Acá va fetch(req) pelado, sin el {cache:'no-store'}: a una petición de
+     navegación no se le puede pasar init, porque por dentro se construye un
+     Request nuevo y el modo 'navigate' no se puede copiar así (TypeError).
+     No hace falta igual: index.html se sirve con must-revalidate. */
   if (req.mode === 'navigate') {
     e.respondWith(
-      fromNetwork(req)['catch'](function () {
+      fetch(req)['catch'](function () {
         return caches.match('./index.html').then(function (r) { return r || caches.match('./'); });
       })
     );

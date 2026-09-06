@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="css/app.css?v=7">
+<link rel="stylesheet" href="css/app.css?v=8">
 <script>
   (function () {
     /* Se lee antes de pintar nada: si la intro está desactivada, no arranca. */
@@ -94,41 +94,46 @@
 <!-- El ?v= sube en cada despliegue. Es la red de seguridad contra el caché:
      aunque el navegador o Vercel se aferren a una copia vieja, una URL nueva
      obliga a bajar el archivo de verdad. Súbelo junto con CACHE en sw.js. -->
-<script src="js/stats.js?v=7"></script>
-<script src="js/achievements.js?v=7"></script>
-<script src="js/demo.js?v=7"></script>
-<script src="js/store.js?v=7"></script>
+<script src="js/stats.js?v=8"></script>
+<script src="js/achievements.js?v=8"></script>
+<script src="js/demo.js?v=8"></script>
+<script src="js/store.js?v=8"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="js/cloud.js?v=7"></script>
-<script src="js/charts.js?v=7"></script>
-<script src="js/ui.js?v=7"></script>
-<script src="js/views.js?v=7"></script>
-<script src="js/app.js?v=7"></script>
+<script src="js/cloud.js?v=8"></script>
+<script src="js/charts.js?v=8"></script>
+<script src="js/ui.js?v=8"></script>
+<script src="js/views.js?v=8"></script>
+<script src="js/app.js?v=8"></script>
 <script>
   /* El service worker solo funciona sobre http(s). Si se abre el archivo
      directamente (file://) o dentro de un visor con restricciones, la app
      sigue funcionando igual: los datos están en IndexedDB, no en la red. */
   if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
     window.addEventListener('load', function () {
-      /* Si ya había un service worker mandando, cuando el nuevo tome el control
-         hay que repintar: si no, la pestaña sigue con el código viejo ya
-         cargado en memoria hasta el siguiente arranque. */
-      var hadController = !!navigator.serviceWorker.controller;
-      var reloading = false;
-      navigator.serviceWorker.addEventListener('controllerchange', function () {
-        if (reloading || !hadController) return;
-        reloading = true;
-        location.reload();
-      });
+      /* Acá NO hay ningún location.reload(). Recargar al cambiar de service
+         worker parece buena idea, pero con skipWaiting() + clients.claim() es
+         la receta clásica del bucle de recargas: cualquier cosa que haga
+         reinstalar el worker deja la app recargándose sola sin parar. Y no
+         hace falta: con ?v= en los <script>, must-revalidate y el worker
+         pidiendo el código a la red primero, la próxima vez que se abra la app
+         ya se baja la versión nueva. */
 
       /* updateViaCache:'none' es la clave: sin esto el navegador puede leer el
          propio sw.js desde su caché HTTP y no enterarse nunca de que cambió. */
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
         .then(function (reg) {
-          reg.update();
-          /* al volver a la app (típico en el iPhone) se vuelve a preguntar */
+          var lastCheck = 0;
+          function check() {
+            /* como mucho una consulta por minuto: visibilitychange se dispara
+               muchas veces y no tiene sentido pedir sw.js en cada una */
+            var now = Date.now();
+            if (now - lastCheck < 60000) return;
+            lastCheck = now;
+            reg.update();
+          }
+          check();
           document.addEventListener('visibilitychange', function () {
-            if (!document.hidden) reg.update();
+            if (!document.hidden) check();
           });
         })
         ['catch'](function () { /* sin offline, sin drama */ });

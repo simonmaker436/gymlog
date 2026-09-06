@@ -618,7 +618,11 @@
   function pushSilently() {
     if (!cloudUser) return Promise.resolve();
     return GL.cloud.push(store.exportData()).then(function () {
-      return store.saveSettings({ lastSync: new Date().toISOString() });
+      /* rawStore, NO store: anotar la hora de la última subida es contabilidad
+         interna, no un cambio hecho por la persona. Pasando por la versión
+         envuelta programaría otra subida, que volvería a anotar la hora, que
+         programaría otra subida… un ciclo infinito cada 1,5 s. */
+      return rawStore.saveSettings({ lastSync: new Date().toISOString() });
     })['catch'](function () { /* sin conexión: se reintenta en el próximo cambio */ });
   }
 
@@ -626,17 +630,28 @@
   function scheduleSync() {
     if (!cloudUser) return;
     clearTimeout(syncTimer);
-    syncTimer = setTimeout(function () { pushSilently().then(function () { render(); }); }, 1500);
+    syncTimer = setTimeout(function () {
+      pushSilently().then(function () {
+        /* Una subida en segundo plano no cambia nada de lo que se ve, salvo la
+           hora de «última sincronización» de Ajustes. Repintar la pantalla
+           entera en cada ciclo reproducía la animación de entrada y parecía
+           que la app se recargaba sola. */
+        if (state.view === 'settings') render();
+      });
+    }, 1500);
   }
 
   /* Envuelve los métodos que cambian datos para subirlos solos a la nube,
-     sin tocar cada punto donde se llaman. */
+     sin tocar cada punto donde se llaman. rawStore guarda los originales para
+     los cambios internos, que no deben disparar una subida. */
+  var rawStore = {};
   var AUTOSYNC_METHODS = ['saveWorkout', 'deleteWorkout', 'saveWeight', 'deleteWeight',
     'saveMeasurement', 'deleteMeasurement', 'saveSettings', 'saveAchievements',
     'clearAll', 'importData', 'seedDemo', 'clearDemo'];
   function wrapStoreForAutoSync() {
     AUTOSYNC_METHODS.forEach(function (name) {
       var orig = store[name];
+      rawStore[name] = function () { return orig.apply(store, arguments); };
       store[name] = function () {
         var r = orig.apply(store, arguments);
         if (r && typeof r.then === 'function') r.then(scheduleSync, function () { }); else scheduleSync();
