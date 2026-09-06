@@ -178,6 +178,29 @@
     lastSync: null            // fecha de la última sincronización con la nube
   };
 
+  /* Una sola etiqueta por sesión. Nada de listas de ejercicios ni series:
+     esto es un cuaderno de constancia, no de rutinas. */
+  var WORKOUT_TYPES = [
+    { key: 'pierna', label: 'Pierna' },
+    { key: 'empuje', label: 'Empuje' },
+    { key: 'tiron', label: 'Tirón' },
+    { key: 'fullbody', label: 'Full body' },
+    { key: 'cardio', label: 'Cardio' },
+    { key: 'otro', label: 'Otro' }
+  ];
+
+  function workoutTypeLabel(key) {
+    var t = WORKOUT_TYPES.find(function (x) { return x.key === key; });
+    return t ? t.label : null;
+  }
+
+  /* Opcional a propósito: null es un valor válido y significa «sin etiqueta».
+     Cualquier cosa que no esté en la lista se descarta. */
+  function normalizeType(v) {
+    if (v === '' || v === null || v === undefined) return null;
+    return WORKOUT_TYPES.some(function (t) { return t.key === v; }) ? v : null;
+  }
+
   var BODY_GOALS = [
     { key: 'ganar-musculo', label: 'Ganar músculo' },
     { key: 'perder-grasa', label: 'Perder grasa' },
@@ -410,6 +433,8 @@
         energy: data.went ? clamp15(data.energy) : null,
         feeling: data.went ? clamp15(data.feeling) : null,
         difficulty: data.went ? clamp15(data.difficulty) : null,
+        // sin ir al gimnasio no hay tipo de entreno que valga
+        type: data.went ? normalizeType(data.type) : null,
         weight: (data.weight === '' || data.weight === null || data.weight === undefined || isNaN(Number(data.weight)))
           ? null : Number(data.weight),
         notes: (data.notes || '').trim(),
@@ -622,6 +647,9 @@
             energy: w.energy == null ? null : clamp15(w.energy),
             feeling: w.feeling == null ? null : clamp15(w.feeling),
             difficulty: w.difficulty == null ? null : clamp15(w.difficulty),
+            /* Las copias hechas antes de que existiera el tipo no lo traen:
+               quedan en null, que es un valor válido. */
+            type: normalizeType(w.type),
             weight: (w.weight == null || isNaN(Number(w.weight))) ? null : Number(w.weight),
             notes: (w.notes || '').toString(),
             demo: !!w.demo,
@@ -689,7 +717,9 @@
 
     uid: uid,
     weeklyTarget: weeklyTarget,
+    workoutTypeLabel: workoutTypeLabel,
     DEFAULT_SETTINGS: DEFAULT_SETTINGS,
+    WORKOUT_TYPES: WORKOUT_TYPES,
     BODY_GOALS: BODY_GOALS
   };
 

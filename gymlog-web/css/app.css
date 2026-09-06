@@ -857,6 +857,17 @@ main {
 .pill.miss { background: var(--miss-soft); color: var(--miss); border-color: color-mix(in srgb, var(--miss) 40%, transparent); }
 .pill.warn { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .pill.demo { background: transparent; color: var(--text-muted); border-style: dashed; }
+.pill.type { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 38%, transparent); }
+.entry .pill.type { margin-top: 8px; }
+
+/* «Full body» no entra en la tipografía enorme de las casillas, así que el
+   tipo de entreno se muestra un paso más chico. */
+.tile .v .typeval {
+  font-size: clamp(16px, 4.4vw, 19px);
+  line-height: 1.15;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
 
 /* -------------------------------------------------------------- filtros */
 .segmented {

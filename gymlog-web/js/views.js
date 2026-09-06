@@ -12,6 +12,14 @@
   /* ---------------------------------------------------------- formatos */
   var NONE = '<span class="none">sin datos</span>';
 
+  /* El tipo de entreno es opcional: sin etiqueta se dice, no se inventa. */
+  function typeValue(key) {
+    var label = GL.store.workoutTypeLabel(key);
+    return label
+      ? '<span class="typeval">' + esc(label) + '</span>'
+      : '<span class="none">sin tipo</span>';
+  }
+
   function fmtWeight(v, units) {
     if (v == null) return '—';
     return (Math.round(v * 10) / 10).toLocaleString('es-ES') + ' ' + units;
@@ -266,6 +274,9 @@
       (w.demo ? '<span class="pill demo">ejemplo</span>' : '') +
       '</div>' +
       '<h3>' + (w.went ? 'Sesión completada' : 'No fui') + '</h3>' +
+      (w.went && GL.store.workoutTypeLabel(w.type)
+        ? '<span class="pill type">' + esc(GL.store.workoutTypeLabel(w.type)) + '</span>'
+        : '') +
       (w.went
         ? '<div class="metrics">' +
         '<span>' + icon('clock') + '<b>' + S.formatDuration(w.duration) + '</b></span>' +
@@ -331,9 +342,10 @@
           tile('Energía', w.energy + '<small>/5</small>') +
           tile('Sensación', w.feeling + '<small>/5</small>') +
           '</div>' +
-          '<div class="tiles two" style="margin-top:8px">' +
+          '<div class="tiles three" style="margin-top:8px">' +
           tile('Dificultad', w.difficulty + '<small>/5</small>') +
           tile('Peso', w.weight != null ? fmtWeight(w.weight, ctx.settings.units) : NONE) +
+          tile('Tipo', typeValue(w.type)) +
           '</div>' +
           (w.notes ? '<p style="margin:14px 0 0;font-size:14px;color:var(--text-dim);border-left:1px solid var(--border-strong);padding-left:11px">' + esc(w.notes) + '</p>' : '')
           : '<p class="muted" style="margin:0 0 14px;font-size:14px">' +
@@ -1086,6 +1098,6 @@
     home: home, calendar: calendar, history: history, progress: progress, settings: settings,
     entryCard: entryCard, fmtWeight: fmtWeight, fmtCm: fmtCm, fmtAvg: fmtAvg, fmtPct: fmtPct, dec: dec,
     statusPill: statusPill, tile: tile, weekDots: weekDots, sectionTitle: sectionTitle,
-    goalRing: goalRing, NONE: NONE
+    goalRing: goalRing, typeValue: typeValue, NONE: NONE
   };
 })(window.GL = window.GL || {});

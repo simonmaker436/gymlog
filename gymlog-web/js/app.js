@@ -150,7 +150,8 @@
     var t = S.typicalWorkout(c.workouts);
     return {
       id: null, date: c.today, went: true, duration: t.duration,
-      energy: t.energy, feeling: t.feeling, difficulty: t.difficulty, weight: null, notes: ''
+      energy: t.energy, feeling: t.feeling, difficulty: t.difficulty,
+      type: null, weight: null, notes: ''
     };
   }
 
@@ -161,6 +162,7 @@
       id: existing.id, date: existing.date, went: existing.went,
       duration: existing.duration || 60,
       energy: existing.energy || 4, feeling: existing.feeling || 4, difficulty: existing.difficulty || 3,
+      type: existing.type || null,
       weight: existing.weight, notes: existing.notes || ''
     } : Object.assign(blank(c), { date: date || c.today });
 
@@ -208,6 +210,13 @@
         '<div class="field"><label>¿Cómo me sentí? <span class="rating-out">' + f.feeling + '/5</span></label>' + ratingRow('feeling', f.feeling) + '</div>' +
         '<div class="field"><label>Dificultad <span class="rating-out">' + f.difficulty + '/5</span></label>' + ratingRow('difficulty', f.difficulty) + '</div>' +
 
+        '<div class="field"><label>Tipo de entreno <span class="hint">opcional</span></label>' +
+        '<div class="optiongrid" id="f-type">' +
+        GL.store.WORKOUT_TYPES.map(function (t) {
+          return '<button type="button" data-type="' + t.key + '"' +
+            (f.type === t.key ? ' class="is-active"' : '') + '>' + esc(t.label) + '</button>';
+        }).join('') + '</div></div>' +
+
         '<div class="field"><label for="f-w">Peso corporal <span class="hint">opcional</span></label>' +
         '<span style="position:relative;display:block">' +
         '<input class="input" type="number" inputmode="decimal" step="0.1" id="f-w" placeholder="—" value="' +
@@ -245,6 +254,7 @@
             f = {
               id: w.id, date: date, went: w.went, duration: w.duration || 60,
               energy: w.energy || 4, feeling: w.feeling || 4, difficulty: w.difficulty || 3,
+              type: w.type || null,
               weight: w.weight, notes: w.notes || ''
             };
           } else { f.id = null; f.date = date; }
@@ -296,6 +306,18 @@
             });
           });
 
+          /* Tipo de entreno: es opcional, así que volver a tocar el que ya
+             está elegido lo quita. */
+          $('#f-type').addEventListener('click', function (e) {
+            var b = e.target.closest('[data-type]');
+            if (!b) return;
+            var key = b.getAttribute('data-type');
+            f.type = (f.type === key) ? null : key;
+            Array.prototype.forEach.call(this.children, function (x) {
+              x.classList.toggle('is-active', x.getAttribute('data-type') === f.type);
+            });
+          });
+
           ['#f-h', '#f-m'].forEach(function (sel) { $(sel).addEventListener('input', readDuration); });
         }
         bind();
@@ -310,6 +332,7 @@
           save({
             id: f.id, date: $('#f-date').value || f.date, went: f.went,
             duration: f.duration, energy: f.energy, feeling: f.feeling, difficulty: f.difficulty,
+            type: f.type,
             weight: f.went && $('#f-w') ? $('#f-w').value : null,
             notes: $('#f-n').value
           });
@@ -369,9 +392,10 @@
           V.tile('Energía', w.energy + '<small>/5</small>') +
           V.tile('Sensación', w.feeling + '<small>/5</small>') +
           '</div>' +
-          '<div class="tiles">' +
+          '<div class="tiles three">' +
           V.tile('Dificultad', w.difficulty + '<small>/5</small>') +
           V.tile('Peso', w.weight != null ? V.fmtWeight(w.weight, c.settings.units) : V.NONE) +
+          V.tile('Tipo', V.typeValue(w.type)) +
           '</div>'
           : '') +
         (w.notes
@@ -399,7 +423,7 @@
           store.saveWorkout({
             id: null, date: copy.date, went: copy.went, duration: copy.duration,
             energy: copy.energy, feeling: copy.feeling, difficulty: copy.difficulty,
-            weight: copy.weight, notes: copy.notes, demo: copy.demo
+            type: copy.type, weight: copy.weight, notes: copy.notes, demo: copy.demo
           }).then(function () { render(); U.toast('Recuperada', 'ok'); });
         }
       });
