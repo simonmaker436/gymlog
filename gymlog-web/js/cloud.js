@@ -124,6 +124,36 @@
     }).then(function (r) { if (r.error) throw new Error(friendlyError(r.error)); return r.data || null; });
   }
 
+  /* Llama a la Edge Function que habla con Gemini. La clave de la IA vive
+     allá, no acá: desde el navegador solo se manda el resumen de sesiones y
+     el token del usuario, que supabase-js adjunta solo. */
+  function coach(workouts, today) {
+    var c = sb();
+    if (!c) return Promise.reject(new Error('No hay conexión con la nube ahora mismo.'));
+    return c.functions.invoke('coach', { body: { workouts: workouts, today: today } })
+      .then(function (r) {
+        /* Cuando la función responde con un código de error, supabase-js trae
+           el detalle dentro de r.error.context; ahí está nuestro mensaje. */
+        if (r.error) {
+          var ctxRes = r.error.context;
+          if (ctxRes && typeof ctxRes.json === 'function') {
+            return ctxRes.json()
+              .then(function (body) {
+                throw new Error((body && body.error) || friendlyError(r.error));
+              })
+              ['catch'](function (e) {
+                throw (e instanceof Error ? e : new Error(friendlyError(r.error)));
+              });
+          }
+          throw new Error(friendlyError(r.error));
+        }
+        if (!r.data || (!r.data.recomendacion && !r.data.consejo)) {
+          throw new Error(r.data && r.data.error ? r.data.error : 'La IA no devolvió nada.');
+        }
+        return r.data;
+      });
+  }
+
   var LAST_USER_KEY = 'gymlog:lastCloudUser';
   function lastUserId() {
     try { return localStorage.getItem(LAST_USER_KEY); } catch (e) { return null; }
@@ -141,6 +171,7 @@
     signUp: signUp,
     signOut: signOut,
     push: push,
-    pull: pull
+    pull: pull,
+    coach: coach
   };
 })(window.GL = window.GL || {});

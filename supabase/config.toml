@@ -1,0 +1,7 @@
+project_id = "dfvidkbcnvngnskswirs"
+
+[functions.coach]
+# verify_jwt queda en true (el valor por defecto): la función solo responde a
+# alguien con sesión iniciada en la app. supabase.functions.invoke manda el
+# token del usuario solo.
+enabled = true

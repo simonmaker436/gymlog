@@ -175,7 +175,13 @@
     heightCm: null,
     startWeight: null,        // peso indicado en la encuesta inicial (solo referencia)
     bodyGoal: null,           // 'ganar-musculo' | 'perder-grasa' | 'mantenerme' | 'rendimiento'
-    lastSync: null            // fecha de la última sincronización con la nube
+    lastSync: null,           // fecha de la última sincronización con la nube
+    /* Última recomendación de la IA. Se guarda con el día en que se pidió
+       para no gastar cuota más de una vez al día. Va en settings a propósito:
+       así viaja a la cuenta y el mismo consejo aparece en todos los
+       dispositivos sin volver a llamar a la API.
+       { date: 'YYYY-MM-DD', recomendacion, consejo } */
+    coach: null
   };
 
   /* Una sola etiqueta por sesión. Nada de listas de ejercicios ni series:
@@ -252,6 +258,20 @@
     }
     if (!BODY_GOALS.some(function (g) { return g.key === out.bodyGoal; })) out.bodyGoal = null;
     if (out.lastSync && isNaN(Date.parse(out.lastSync))) out.lastSync = null;
+
+    /* Solo se acepta un consejo con la forma esperada; cualquier otra cosa
+       se descarta y se vuelve a pedir. */
+    if (out.coach) {
+      var co = out.coach;
+      var ok = co && typeof co === 'object' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(co.date || '') &&
+        (typeof co.recomendacion === 'string' || typeof co.consejo === 'string');
+      out.coach = ok ? {
+        date: co.date,
+        recomendacion: (co.recomendacion || '').toString().slice(0, 600),
+        consejo: (co.consejo || '').toString().slice(0, 600)
+      } : null;
+    }
 
     /* null a propósito: significa «los que tenga programados», así la meta
        sigue sola a los días de gimnasio hasta que se fije un número. */

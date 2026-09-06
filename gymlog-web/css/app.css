@@ -706,6 +706,33 @@ main {
 }
 .rcard.is-empty .v { color: var(--text-muted); }
 
+/* ------------------------------------------------- entrenador con IA */
+.card.coach { border-left: 2px solid var(--accent); }
+.coach-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.coach-head .spacer { flex: 1; }
+.coach-head .btn.sm { flex: none; }
+.coach-main {
+  margin: 0;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--text);
+}
+.coach-tip {
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+.coach-wait, .coach-err {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.coach-err { color: var(--miss); }
+
 /* ------------------------------------------- barra de la meta semanal */
 .wgoal { margin-top: 16px; }
 .wgoal-top { display: flex; align-items: baseline; gap: 8px; }

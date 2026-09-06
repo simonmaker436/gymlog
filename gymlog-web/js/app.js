@@ -51,6 +51,9 @@
       eff: S.effectiveStart(settings.startDate, workouts),
       hasDemo: store.hasDemo(),
       cloud: cloudUser,
+      coach: settings.coach,
+      coachState: coachState,
+      coachMin: COACH_MIN_WORKOUTS,
       syncAge: settings.lastSync
         ? Math.max(0, Math.floor((Date.now() - new Date(settings.lastSync).getTime()) / 86400000))
         : null,
@@ -785,6 +788,62 @@
     });
   }
 
+  /* --------------------------------------------------- entrenador con IA
+     Una consulta por día como mucho: el plan gratis de Gemini tiene cuota, y
+     el consejo no cambia tanto como para pedirlo en cada apertura. El
+     resultado se guarda en settings, así que además viaja a la cuenta y los
+     otros dispositivos lo leen sin volver a llamar. */
+  var COACH_MIN_WORKOUTS = 3;
+  var coachState = { loading: false, error: null };
+
+  function coachEligible() {
+    return !!cloudUser && S.done(store.workouts()).length >= COACH_MIN_WORKOUTS;
+  }
+
+  function coachNeedsRefresh() {
+    var c = store.settings().coach;
+    return !c || c.date !== S.today();
+  }
+
+  /* Solo lo que la función necesita: ni pesos corporales ni ids. */
+  function coachPayload() {
+    return S.done(store.workouts()).slice(0, 30).map(function (w) {
+      return {
+        date: w.date, type: w.type || null,
+        energy: w.energy, feeling: w.feeling, difficulty: w.difficulty,
+        duration: w.duration, notes: w.notes || ''
+      };
+    });
+  }
+
+  function fetchCoach(force) {
+    if (coachState.loading) return Promise.resolve();
+    if (!coachEligible()) return Promise.resolve();
+    if (!force && !coachNeedsRefresh()) return Promise.resolve();
+
+    coachState.loading = true;
+    coachState.error = null;
+    render();
+
+    return GL.cloud.coach(coachPayload(), S.today())
+      .then(function (data) {
+        coachState.loading = false;
+        return store.saveSettings({
+          coach: {
+            date: S.today(),
+            recomendacion: data.recomendacion || '',
+            consejo: data.consejo || ''
+          }
+        });
+      })
+      .then(function () { render(); })
+      ['catch'](function (err) {
+        coachState.loading = false;
+        coachState.error = err && err.message ? err.message : 'No se pudo consultar la IA.';
+        render();
+      });
+  }
+
   function cloudSync() {
     if (!cloudUser) return;
     U.toast('Sincronizando…');
@@ -1102,6 +1161,7 @@
         });
         break;
       case 'cloud-sync': cloudSync(); break;
+      case 'coach-refresh': fetchCoach(true); break;
 
       case 'auth-mode': {
         // conserva lo ya escrito al cambiar entre crear cuenta e iniciar sesión
@@ -1368,6 +1428,10 @@
       var introStillPlaying = !!document.getElementById('boot');
       setTimeout(function () { maybeOpenOnboarding(isNewAccount); },
         introStillPlaying ? INTRO_MS + 400 : 500);
+
+      /* En segundo plano y sin bloquear la pantalla: si ya hay consejo de hoy
+         no se llama a nada. */
+      setTimeout(function () { fetchCoach(false); }, 1200);
 
       var lastDay = S.today();
       clearInterval(dayTickTimer);

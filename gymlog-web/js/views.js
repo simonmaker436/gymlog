@@ -40,6 +40,41 @@
       '</div>';
   }
 
+  /* ------------------------------------------------- entrenador con IA
+     Con pocas sesiones no hay patrón que leer, así que la tarjeta ni aparece
+     (y el cliente tampoco llama a la función: no se gasta cuota en balde). */
+  function coachCard(ctx) {
+    var done = S.done(ctx.workouts).length;
+    if (!ctx.cloud || done < ctx.coachMin) return '';
+
+    var st = ctx.coachState || {};
+    var c = ctx.coach;
+    var cuerpo;
+
+    if (st.loading) {
+      cuerpo = '<p class="coach-wait">Mirando tus últimas sesiones…</p>';
+    } else if (st.error) {
+      cuerpo = '<p class="coach-err">' + esc(st.error) + '</p>';
+    } else if (c && (c.recomendacion || c.consejo)) {
+      cuerpo =
+        (c.recomendacion ? '<p class="coach-main">' + esc(c.recomendacion) + '</p>' : '') +
+        (c.consejo ? '<p class="coach-tip">' + esc(c.consejo) + '</p>' : '');
+    } else {
+      cuerpo = '<p class="coach-wait">Todavía sin recomendación de hoy.</p>';
+    }
+
+    var cuando = c && c.date === ctx.today ? 'Hoy'
+      : c && c.date ? esc(S.formatShort(c.date)) : '';
+
+    return '<div class="card coach">' +
+      '<div class="coach-head">' +
+      '<span class="eyebrow">Entrenador' + (cuando ? ' · ' + cuando : '') + '</span>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn sm subtle" data-act="coach-refresh"' + (st.loading ? ' disabled' : '') + '>' +
+      icon('replay') + (st.loading ? 'Pensando…' : 'Actualizar') + '</button>' +
+      '</div>' + cuerpo + '</div>';
+  }
+
   /* Barra de la meta semanal. Pasada la meta sigue creciendo hasta el borde,
      pero en verde: cumplida es cumplida, lo de más es de más. */
   function weeklyGoalBar(count, target) {
@@ -226,6 +261,9 @@
       tile('Totales', String(doneTotal),
         doneTotal && ctx.eff ? 'desde el ' + esc(S.formatShort(ctx.eff)) : 'aún sin registros') +
       '</div>';
+
+    /* ---- entrenador con IA */
+    html += coachCard(ctx);
 
     /* ---- motivación */
     if (st.current >= 3) {
