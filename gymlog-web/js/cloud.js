@@ -1,10 +1,8 @@
 /* =========================================================================
-   cloud.js — Sincronización opcional con la nube (Supabase).
+   cloud.js — Sincronización con la nube (Supabase).
    =========================================================================
-   Nada de esto es obligatorio: es un respaldo aparte, no un reemplazo de
-   IndexedDB. Login por código de un solo uso (OTP) enviado por email, nunca
-   por enlace mágico — un enlace abriría el navegador en vez de la app
-   instalada y ahí se perdería la sesión.
+   Acceso con email y contraseña. Los datos siguen viviendo en IndexedDB: la
+   nube es el puente entre dispositivos, no el almacén principal.
    ========================================================================= */
 (function (GL) {
   'use strict';
@@ -22,29 +20,16 @@
     return client;
   }
 
+  /* Los mensajes de Supabase vienen en inglés y algunos son crípticos. */
   function friendlyError(err) {
     var msg = (err && err.message) || 'Ocurrió un error con la nube.';
-    if (/rate limit/i.test(msg)) return 'Demasiados intentos. Esperá un minuto y probá de nuevo.';
-    if (/invalid|expired|otp/i.test(msg) && /token|otp|code/i.test(msg)) return 'Código incorrecto o vencido.';
+    if (/invalid login credentials/i.test(msg)) return 'Email o contraseña incorrectos.';
+    if (/already registered|already exists|user already/i.test(msg)) return 'Ese email ya tiene cuenta. Iniciá sesión.';
+    if (/password should be at least/i.test(msg)) return 'La contraseña necesita al menos 6 caracteres.';
+    if (/email address.*invalid|invalid email/i.test(msg)) return 'Ese email no parece válido.';
+    if (/rate limit|too many/i.test(msg)) return 'Demasiados intentos. Esperá un minuto y probá de nuevo.';
+    if (/email not confirmed/i.test(msg)) return 'La cuenta existe pero falta confirmar el email.';
     return msg;
-  }
-
-  /* Cuando se pide un código con shouldCreateUser:false y la cuenta no existe,
-     Supabase responde con «Signups not allowed for otp» (código otp_disabled).
-     Eso no es un fallo: es la forma de preguntar «¿este email ya tiene cuenta?»
-     sin mandar ningún correo. */
-  function isNoAccount(err) {
-    return (err && err.code) === 'otp_disabled' ||
-      /signups? not allowed/i.test((err && err.message) || '');
-  }
-
-  /* Pide un código. `create` decide si se permite dar de alta la cuenta:
-     iniciar sesión nunca crea nada, crear cuenta sí. */
-  function requestCode(email, create) {
-    var c = sb();
-    if (!c) return Promise.reject(new Error('No hay conexión con la nube ahora mismo.'));
-    return c.auth.signInWithOtp({ email: email, options: { shouldCreateUser: !!create } })
-      .then(function (r) { if (r.error) throw r.error; return true; });
   }
 
   function session() {
@@ -53,45 +38,30 @@
     return c.auth.getSession().then(function (r) { return (r.data && r.data.session) || null; });
   }
 
-  /* Iniciar sesión: si el email no tiene cuenta, no se crea nada a escondidas.
-     Se avisa y se ofrece el otro camino. */
-  function sendSignInCode(email) {
-    return requestCode(email, false)['catch'](function (err) {
-      if (isNoAccount(err)) {
-        var e = new Error('No hay ninguna cuenta con ese email. Probá crear una.');
-        e.noAccount = true;
-        throw e;
-      }
-      throw new Error(friendlyError(err));
-    });
-  }
-
-  /* Crear cuenta: primero se pregunta sin crear nada. Si la cuenta ya existía,
-     se avisa y el mismo código sirve para entrar; si no existía, recién ahí se
-     manda el alta. En los dos casos sale un solo email. */
-  function sendSignUpCode(email) {
-    return requestCode(email, false)
-      .then(function () { return { existed: true }; })
-      ['catch'](function (err) {
-        if (!isNoAccount(err)) throw new Error(friendlyError(err));
-        return requestCode(email, true)
-          .then(function () { return { existed: false }; })
-          ['catch'](function (err2) { throw new Error(friendlyError(err2)); });
+  function signIn(email, password) {
+    var c = sb();
+    if (!c) return Promise.reject(new Error('No hay conexión con la nube ahora mismo.'));
+    return c.auth.signInWithPassword({ email: email, password: password })
+      .then(function (r) {
+        if (r.error) throw new Error(friendlyError(r.error));
+        return r.data.session;
       });
   }
 
-  /* Reenviar sobre un email que a esta altura ya tiene cuenta. */
-  function resendCode(email) {
-    return requestCode(email, false)['catch'](function (err) {
-      throw new Error(friendlyError(err));
-    });
-  }
-
-  function verifyCode(email, code) {
+  /* Con «Confirm email» desactivado en Supabase, signUp devuelve la sesión ya
+     iniciada y no manda ningún correo. Si alguien vuelve a activar esa opción,
+     signUp responde sin sesión: ahí sí hay que ir al email, y lo decimos. */
+  function signUp(email, password) {
     var c = sb();
     if (!c) return Promise.reject(new Error('No hay conexión con la nube ahora mismo.'));
-    return c.auth.verifyOtp({ email: email, token: code, type: 'email' })
-      .then(function (r) { if (r.error) throw new Error(friendlyError(r.error)); return r.data.session; });
+    return c.auth.signUp({ email: email, password: password })
+      .then(function (r) {
+        if (r.error) throw new Error(friendlyError(r.error));
+        if (!r.data.session) {
+          throw new Error('Falta confirmar el email antes de entrar. Revisá tu correo.');
+        }
+        return r.data.session;
+      });
   }
 
   function signOut() {
@@ -135,10 +105,8 @@
     lastUserId: lastUserId,
     setLastUserId: setLastUserId,
     session: session,
-    sendSignInCode: sendSignInCode,
-    sendSignUpCode: sendSignUpCode,
-    resendCode: resendCode,
-    verifyCode: verifyCode,
+    signIn: signIn,
+    signUp: signUp,
     signOut: signOut,
     push: push,
     pull: pull

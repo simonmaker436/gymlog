@@ -1477,55 +1477,24 @@ button.row:hover { background: var(--surface-2); }
 }
 .authcard .field { margin-bottom: 16px; }
 
-/* --------------- encabezado del paso: título + progreso 1·2 */
-.authhead {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-.authhead h2 {
-  font-family: var(--font-cond);
-  font-weight: 800;
-  font-size: 17px;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--text);
+/* --------------- pestañas: entrar a una cuenta o crear una nueva */
+.authtabs { margin-bottom: 18px; }
+.authtabs button { padding: 11px 12px; }
+
+/* --------------- error dentro de la tarjeta, no como toast pasajero */
+.autherror {
+  margin: 0 0 16px;
+  padding: 11px 13px;
+  border-radius: var(--r-2);
+  background: var(--miss-soft);
+  border: 1px solid color-mix(in srgb, var(--miss) 45%, transparent);
+  color: var(--miss);
+  font-size: 13px;
+  line-height: 1.45;
   text-align: center;
 }
-.authprogress {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.authprogress i {
-  width: 16px; height: 3px;
-  border-radius: 2px;
-  background: var(--border-strong);
-  transition: background .18s ease;
-}
-.authprogress i.on { background: var(--accent); }
-.authprogress span {
-  margin-left: 4px;
-  font-family: var(--font-cond);
-  font-weight: 700;
-  font-size: 11px;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
+.autherror[hidden] { display: none; }
 
-/* --------------- portada: las dos acciones separadas y explícitas */
-.authactions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.authcard p.authlead {
-  margin-bottom: 22px;
-  font-size: 13.5px;
-}
 .authcard .authfoot {
   margin: 20px 0 0;
   padding-top: 16px;
@@ -1534,35 +1503,4 @@ button.row:hover { background: var(--surface-2); }
   line-height: 1.5;
   color: var(--text-muted);
   text-align: center;
-}
-
-/* --------------- enlaces secundarios bajo el botón principal */
-.authalt {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
-}
-.authalt span { color: var(--border-strong); font-size: 12px; }
-.authalt button {
-  font-family: var(--font-cond);
-  font-weight: 700;
-  font-size: 12.5px;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  transition: color .16s ease;
-}
-.authalt button:hover { color: var(--accent); }
-
-/* --------------- el código se lee mejor espaciado y centrado */
-.input.authcode {
-  text-align: center;
-  font-family: var(--font-cond);
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: .34em;
-  text-indent: .34em;
 }

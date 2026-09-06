@@ -29,7 +29,6 @@
   var bootTheme = null;
   var cloudUser = null; // { email, id } o null si no hay sesión
   var authEmail = '';
-  var authStep = 'landing';       // landing | email | code
   var authMode = 'signin';        // signin | signup — nunca se crea una cuenta sin pedirlo
   var dayTickTimer = null;
 
@@ -668,88 +667,86 @@
   }
 
   /* --------------------------------------------------- pantalla de acceso
-     Tres pasos, y en todo momento se ve en cuál estás:
-       landing → elegir entre iniciar sesión o crear cuenta
-       email   → escribir el email (el encabezado recuerda qué elegiste)
-       code    → escribir el código de 6 dígitos                        */
-  function renderAuth(step, email) {
+     Un solo formulario: email y contraseña. La pestaña de arriba decide si se
+     entra a una cuenta que ya existe o se crea una nueva. */
+  function renderAuth(mode, email) {
     if (email !== undefined) authEmail = email;
-    authStep = step || 'landing';
-
+    if (mode) authMode = mode === 'signup' ? 'signup' : 'signin';
     var signup = authMode === 'signup';
-    var flowName = signup ? 'Crear cuenta' : 'Iniciar sesión';
-    var body;
-
-    if (authStep === 'code') {
-      body =
-        authHead(flowName, 2, 'Paso 2 de 2') +
-        '<p class="muted">Te mandamos un código de 6 dígitos a<br><b>' + esc(authEmail) + '</b></p>' +
-        '<div class="field"><label for="au-code">Código</label>' +
-        '<input class="input authcode" id="au-code" inputmode="numeric" maxlength="6" ' +
-        'autocomplete="one-time-code" placeholder="000000"></div>' +
-        '<button class="btn primary block" data-act="auth-verify">Entrar</button>' +
-        '<div class="authalt">' +
-        '<button type="button" data-act="auth-resend">Reenviar código</button>' +
-        '<span>·</span>' +
-        '<button type="button" data-act="auth-back">Cambiar email</button>' +
-        '</div>';
-
-    } else if (authStep === 'email') {
-      body =
-        authHead(flowName, 1, 'Paso 1 de 2') +
-        '<p class="muted">' + (signup
-          ? 'Con tu email alcanza. Te mandamos un código para confirmarlo — no hay contraseñas que recordar.'
-          : 'Escribí el email de tu cuenta y te mandamos un código para entrar.') + '</p>' +
-        '<div class="field"><label for="au-email">Email</label>' +
-        '<input class="input" type="email" id="au-email" autocomplete="email" ' +
-        'placeholder="vos@email.com" value="' + esc(authEmail) + '"></div>' +
-        '<button class="btn primary block" data-act="auth-send">Enviar código</button>' +
-        '<div class="authalt">' +
-        '<button type="button" data-act="auth-back">Volver</button>' +
-        '</div>';
-
-    } else {
-      body =
-        '<p class="muted authlead">Tu registro de entrenamientos, en todos tus dispositivos.</p>' +
-        '<div class="authactions">' +
-        '<button class="btn primary block" data-act="auth-mode" data-mode="signin">Iniciar sesión</button>' +
-        '<button class="btn ghost block" data-act="auth-mode" data-mode="signup">Crear cuenta</button>' +
-        '</div>' +
-        '<p class="authfoot">Los datos de este dispositivo no se pierden: se suben a la cuenta la primera vez que entrás.</p>';
-    }
 
     document.getElementById('app').innerHTML =
       '<div class="authpage"><div class="authcard">' +
       '<div class="brand">' + icon('barbell') + '<b>GymLog</b></div>' +
-      body +
-      '</div></div>';
 
-    var input = document.getElementById(authStep === 'code' ? 'au-code' : 'au-email');
-    if (input) {
-      setTimeout(function () { input.focus(); }, 60);
-      input.addEventListener('keydown', function (e) {
+      '<div class="segmented authtabs">' +
+      '<button type="button" data-act="auth-mode" data-mode="signin"' +
+      (signup ? '' : ' class="is-active"') + '>Iniciar sesión</button>' +
+      '<button type="button" data-act="auth-mode" data-mode="signup"' +
+      (signup ? ' class="is-active"' : '') + '>Crear cuenta</button>' +
+      '</div>' +
+
+      '<p class="muted">' + (signup
+        ? 'Elegí un email y una contraseña. Se crea al instante, sin correos de confirmación.'
+        : 'Entrá con el email y la contraseña de tu cuenta.') + '</p>' +
+
+      '<div class="field"><label for="au-email">Email</label>' +
+      '<input class="input" type="email" id="au-email" autocomplete="email" ' +
+      'placeholder="vos@email.com" value="' + esc(authEmail) + '"></div>' +
+
+      '<div class="field"><label for="au-pass">Contraseña</label>' +
+      '<input class="input" type="password" id="au-pass" ' +
+      'autocomplete="' + (signup ? 'new-password' : 'current-password') + '" ' +
+      'placeholder="' + (signup ? 'Mínimo 6 caracteres' : '••••••••') + '"></div>' +
+
+      (signup
+        ? '<div class="field"><label for="au-pass2">Repetir contraseña</label>' +
+        '<input class="input" type="password" id="au-pass2" autocomplete="new-password" ' +
+        'placeholder="••••••••"></div>'
+        : '') +
+
+      '<p class="autherror" id="au-error" role="alert" hidden></p>' +
+
+      '<button class="btn primary block" data-act="auth-submit">' +
+      (signup ? 'Crear cuenta' : 'Entrar') + '</button>' +
+
+      '<p class="authfoot">Los datos que ya tenés en este dispositivo se suben a la cuenta la primera vez que entrás.</p>' +
+      '</div></div>' +
+      /* U.toast() escribe en #toasts, que lo crea buildShell(). Acá todavía no
+         existe, así que los errores van en línea dentro de la tarjeta. */
+      '<div class="toast-wrap" id="toasts"></div>';
+
+    setTimeout(function () {
+      var first = document.getElementById(authEmail ? 'au-pass' : 'au-email');
+      if (first) first.focus();
+    }, 60);
+
+    /* al escribir de nuevo, el error deja de tener sentido */
+    Array.prototype.forEach.call(document.querySelectorAll('.authcard .input'), function (el) {
+      el.addEventListener('input', function () { authError(''); });
+    });
+
+    /* Enter en cualquier campo envía el formulario. */
+    Array.prototype.forEach.call(document.querySelectorAll('.authcard .input'), function (el) {
+      el.addEventListener('keydown', function (e) {
         if (e.key !== 'Enter') return;
         e.preventDefault();
-        var go = document.querySelector('[data-act="' + (authStep === 'code' ? 'auth-verify' : 'auth-send') + '"]');
+        var go = document.querySelector('[data-act="auth-submit"]');
         if (go) go.click();
       });
-    }
+    });
   }
 
-  /* encabezado con el nombre del paso y los dos puntitos de progreso */
-  function authHead(title, n, label) {
-    return '<div class="authhead">' +
-      '<h2>' + esc(title) + '</h2>' +
-      '<div class="authprogress" aria-label="' + esc(label) + '">' +
-      '<i' + (n >= 1 ? ' class="on"' : '') + '></i>' +
-      '<i' + (n >= 2 ? ' class="on"' : '') + '></i>' +
-      '<span>' + esc(label) + '</span>' +
-      '</div></div>';
+  /* Mensaje de error dentro de la tarjeta de acceso. Cadena vacía = ocultar. */
+  function authError(msg) {
+    var el = document.getElementById('au-error');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.hidden = !msg;
   }
 
   /* ------------------------------------------------------- encuesta inicial */
-  function maybeOpenOnboarding() {
-    if (store.settings().onboarded) return;
+  function maybeOpenOnboarding(force) {
+    if (!force && store.settings().onboarded) return;
     var s = store.settings();
     var dows = [{ i: 1, l: 'L' }, { i: 2, l: 'M' }, { i: 3, l: 'X' }, { i: 4, l: 'J' },
     { i: 5, l: 'V' }, { i: 6, l: 'S' }, { i: 0, l: 'D' }];
@@ -963,59 +960,44 @@
         clearInterval(dayTickTimer);
         GL.cloud.signOut().then(function () {
           cloudUser = null;
-          authMode = 'signin';
-          renderAuth('landing', '');
+          renderAuth('signin', '');
         });
         break;
       case 'cloud-sync': cloudSync(); break;
 
       case 'auth-mode':
-        authMode = arg('mode') === 'signup' ? 'signup' : 'signin';
-        renderAuth('email');
+        // conserva lo escrito al cambiar de pestaña
+        renderAuth(arg('mode'), (document.getElementById('au-email') || {}).value || '');
         break;
 
-      case 'auth-back':
-        renderAuth(authStep === 'code' ? 'email' : 'landing');
-        break;
+      case 'auth-submit': {
+        var signup = authMode === 'signup';
+        var emailVal = document.getElementById('au-email').value.trim();
+        var passVal = document.getElementById('au-pass').value;
 
-      case 'auth-send': {
-        var authEmailVal = document.getElementById('au-email').value.trim();
-        if (!/^\S+@\S+\.\S+$/.test(authEmailVal)) { U.toast('Escribí un email válido', 'error'); break; }
-        var sendLabel = t.textContent;
-        t.disabled = true; t.textContent = 'Enviando…';
-        var ask = authMode === 'signup'
-          ? GL.cloud.sendSignUpCode(authEmailVal)
-          : GL.cloud.sendSignInCode(authEmailVal);
-        ask.then(function (res) {
-          renderAuth('code', authEmailVal);
-          if (res && res.existed) U.toast('Ese email ya tenía cuenta: entrás con el código', 'ok');
-        })['catch'](function (err) {
-          t.disabled = false; t.textContent = sendLabel;
-          U.toast(err.message || 'No se pudo enviar el código', 'error');
-          // sin cuenta y queriendo entrar: el camino correcto es crearla
-          if (err.noAccount) { authMode = 'signup'; setTimeout(function () { renderAuth('email', authEmailVal); }, 900); }
-        });
+        authError('');
+        if (!/^\S+@\S+\.\S+$/.test(emailVal)) { authError('Escribí un email válido.'); break; }
+        if (passVal.length < 6) { authError('La contraseña necesita al menos 6 caracteres.'); break; }
+        if (signup && passVal !== document.getElementById('au-pass2').value) {
+          authError('Las contraseñas no coinciden.'); break;
+        }
+
+        authEmail = emailVal;
+        var label = t.textContent;
+        t.disabled = true;
+        t.textContent = signup ? 'Creando…' : 'Entrando…';
+
+        (signup ? GL.cloud.signUp(emailVal, passVal) : GL.cloud.signIn(emailVal, passVal))
+          .then(function () { return refreshCloudSession(); })
+          /* Cuenta recién creada: la encuesta de perfil. Cuenta existente: a la
+             app, que la encuesta ya la contestó en su momento. */
+          .then(function () { return enterApp(signup); })
+          ['catch'](function (err) {
+            t.disabled = false; t.textContent = label;
+            authError(err.message || 'No se pudo entrar. Probá de nuevo.');
+          });
         break;
       }
-      case 'auth-verify': {
-        var authCode = document.getElementById('au-code').value.trim();
-        if (!/^\d{6}$/.test(authCode)) { U.toast('El código son 6 números', 'error'); break; }
-        var verifyLabel = t.textContent;
-        t.disabled = true; t.textContent = 'Verificando…';
-        GL.cloud.verifyCode(authEmail, authCode).then(function () {
-          return refreshCloudSession();
-        }).then(function () {
-          return enterApp();
-        })['catch'](function (err) {
-          t.disabled = false; t.textContent = verifyLabel;
-          U.toast(err.message || 'Código incorrecto', 'error');
-        });
-        break;
-      }
-      case 'auth-resend':
-        GL.cloud.resendCode(authEmail).then(function () { U.toast('Código reenviado', 'ok'); })
-          ['catch'](function (err) { U.toast(err.message || 'No se pudo reenviar', 'error'); });
-        break;
       case 'theme':
         store.saveSettings({ theme: arg('theme') }).then(function (s) { applyTheme(s.theme); render(); });
         break;
@@ -1216,8 +1198,9 @@
   }
 
   /* se llama una vez confirmada la sesión: trae los datos de la cuenta y
-     recién ahí pinta la app de verdad. */
-  function enterApp() {
+     recién ahí pinta la app de verdad. `isNewAccount` es true solo cuando se
+     acaba de crear la cuenta: ahí siempre toca la encuesta de perfil. */
+  function enterApp(isNewAccount) {
     return resolveAccountData().then(function () {
       buildShell();
       state.selected = S.today();
@@ -1225,7 +1208,8 @@
       document.getElementById('fab').addEventListener('click', function () { openForm(S.today(), null); });
 
       var introStillPlaying = !!document.getElementById('boot');
-      setTimeout(maybeOpenOnboarding, introStillPlaying ? INTRO_MS + 400 : 500);
+      setTimeout(function () { maybeOpenOnboarding(isNewAccount); },
+        introStillPlaying ? INTRO_MS + 400 : 500);
 
       var lastDay = S.today();
       clearInterval(dayTickTimer);
@@ -1250,7 +1234,7 @@
     }).then(function () {
       wireGlobalEvents();
       scheduleIntroExit();
-      if (!cloudUser) { renderAuth('landing', ''); return; }
+      if (!cloudUser) { renderAuth('signin', ''); return; }
       return enterApp();
     })['catch'](function (err) {
       var boot = document.getElementById('boot');
