@@ -1,7 +1,7 @@
 /* Pruebas del handler completo, con la API de Gemini simulada.
    Correr con:  npx deno@2 test --allow-env supabase/functions/coach/ */
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { handle } from "./index.ts";
+import { GEMINI_MODEL, handle } from "./index.ts";
 
 const realFetch = globalThis.fetch;
 
@@ -125,6 +125,27 @@ Deno.test("respuesta ininteligible del modelo no rompe", async () =>
     const res = await handle(post({ workouts: SESIONES }));
     assertEquals(res.status, 502);
     assert((await res.json()).error.includes("no se pudo leer"));
+  }));
+
+/* Google retiró gemini-2.0-flash sin aviso y la función quedó devolviendo
+   404. Esta prueba fija cuál es el modelo vigente y comprueba que es el que
+   se pide de verdad, para que un cambio a medias se note acá y no en
+   producción. */
+Deno.test("apunta al modelo vigente, con la clave en la query y no en el cuerpo", async () =>
+  await conClave(async () => {
+    let url = "";
+    globalThis.fetch = ((u: unknown) => {
+      url = String(u);
+      return Promise.resolve(new Response(JSON.stringify(geminiOk("a", "b")), { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    await handle(post({ workouts: SESIONES }));
+    assertEquals(GEMINI_MODEL, "gemini-3.6-flash");
+    assert(url.includes(`/models/${GEMINI_MODEL}:generateContent`), `URL inesperada: ${url}`);
+    for (const viejo of ["gemini-2.0-flash", "gemini-2.5-flash"]) {
+      assert(!url.includes(viejo), `no debe quedar rastro de ${viejo}`);
+    }
+    assert(url.includes("key=clave-de-prueba"), "la clave va en la query de Google");
   }));
 
 Deno.test("el prompt que sale lleva los días reales", async () =>

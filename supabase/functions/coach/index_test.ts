@@ -4,6 +4,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   buildPrompt,
   cleanWorkouts,
+  extractText,
   friendlyGeminiError,
   parseModelJson,
   summarize,
@@ -104,6 +105,44 @@ Deno.test("parseModelJson devuelve null con basura", () => {
   assertEquals(parseModelJson("no hay json acá"), null);
   assertEquals(parseModelJson("{roto"), null);
   assertEquals(parseModelJson('{"otra":"cosa"}'), null);
+});
+
+/* gemini-3.6-flash razona antes de responder y la respuesta real trae
+   thoughtSignature junto al texto. Si algún día el razonamiento viene como
+   una parte aparte y primera, leer solo parts[0] devolvería basura. */
+Deno.test("extractText junta las partes de texto y saltea el razonamiento", () => {
+  const conFirma = {
+    candidates: [{
+      content: {
+        parts: [{ text: '{"recomendacion":"a","consejo":"b"}', thoughtSignature: "xxx" }],
+      },
+    }],
+  };
+  assertEquals(extractText(conFirma), '{"recomendacion":"a","consejo":"b"}');
+
+  const conParteDePensamiento = {
+    candidates: [{
+      content: {
+        parts: [
+          { text: "déjame pensar…", thought: true },
+          { text: '{"recomendacion":"a",' },
+          { text: '"consejo":"b"}' },
+        ],
+      },
+    }],
+  };
+  assertEquals(extractText(conParteDePensamiento), '{"recomendacion":"a","consejo":"b"}');
+  assertEquals(parseModelJson(extractText(conParteDePensamiento)), {
+    recomendacion: "a",
+    consejo: "b",
+  });
+});
+
+Deno.test("extractText no explota con respuestas raras", () => {
+  assertEquals(extractText(null), "");
+  assertEquals(extractText({}), "");
+  assertEquals(extractText({ candidates: [] }), "");
+  assertEquals(extractText({ candidates: [{ content: {} }] }), "");
 });
 
 Deno.test("friendlyGeminiError distingue el límite del plan gratis", () => {

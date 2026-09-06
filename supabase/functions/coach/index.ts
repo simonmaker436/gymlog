@@ -14,7 +14,17 @@
    dice explícitamente para que no se invente rutinas.
    ========================================================================= */
 
-const GEMINI_MODEL = "gemini-2.0-flash";
+/* Google retira modelos y además deja de habilitarlos para claves nuevas.
+   Cuando pasa, la función responde «El modelo de IA configurado ya no está
+   disponible» (404 de Gemini): es la señal de cambiar esta línea.
+
+   Para saber cuál poner, la propia respuesta 404 de Google nombra el
+   sustituto, y este endpoint lista los que la clave puede usar:
+     https://generativelanguage.googleapis.com/v1beta/models?key=API_KEY
+
+   Ojo con los alias tipo «gemini-flash-latest»: se ven cómodos, pero al
+   probarlos daban 503 por saturación. Mejor un modelo concreto. */
+export const GEMINI_MODEL = "gemini-3.6-flash";
 const GEMINI_URL =
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
@@ -225,6 +235,21 @@ export interface Advice {
   consejo: string;
 }
 
+/* Los modelos que razonan devuelven varias partes, y la del texto no siempre
+   es la primera: puede venir antes una parte de razonamiento. Se juntan todas
+   las que tengan texto, saltando las marcadas como pensamiento. */
+export function extractText(data: unknown): string {
+  const parts = (data as {
+    candidates?: { content?: { parts?: { text?: unknown; thought?: unknown }[] } }[];
+  })?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return "";
+  return parts
+    .filter((p) => p && typeof p.text === "string" && p.thought !== true)
+    .map((p) => p.text as string)
+    .join("")
+    .trim();
+}
+
 /* El modelo devuelve JSON, pero a veces lo envuelve en ```json. */
 export function parseModelJson(text: string): Advice | null {
   if (!text) return null;
@@ -293,6 +318,7 @@ export async function handle(req: Request): Promise<Response> {
     return json({ error: "El cuerpo de la petición no es JSON válido." }, 400);
   }
 
+
   const workouts = cleanWorkouts(payload.workouts);
   if (workouts.length < 3) {
     return json({ error: "Hacen falta al menos 3 sesiones registradas." }, 400);
@@ -314,7 +340,10 @@ export async function handle(req: Request): Promise<Response> {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 400,
+          /* Holgado a propósito: los modelos 3.x gastan tokens razonando
+             antes de escribir, y con un tope corto se quedaban sin margen
+             para la respuesta en sí. */
+          maxOutputTokens: 1200,
           responseMimeType: "application/json",
           responseSchema: {
             type: "OBJECT",
@@ -339,9 +368,7 @@ export async function handle(req: Request): Promise<Response> {
 
   let out: Advice | null = null;
   try {
-    const data = JSON.parse(text);
-    const part = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    out = parseModelJson(part);
+    out = parseModelJson(extractText(JSON.parse(text)));
   } catch {
     out = null;
   }
