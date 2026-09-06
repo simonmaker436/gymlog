@@ -127,6 +127,19 @@
   /* Llama a la Edge Function que habla con Gemini. La clave de la IA vive
      allá, no acá: desde el navegador solo se manda el resumen de sesiones y
      el token del usuario, que supabase-js adjunta solo. */
+  /* supabase-js devuelve estos errores en inglés y bastante crípticos; en la
+     tarjeta tienen que leerse como una frase normal. */
+  function coachError(err) {
+    var msg = (err && err.message) || '';
+    if (err && err.name === 'FunctionsFetchError' || /failed to send a request/i.test(msg)) {
+      return 'No se pudo contactar al entrenador. Puede que la función todavía no esté desplegada, o que no haya conexión.';
+    }
+    if (err && err.name === 'FunctionsRelayError') {
+      return 'El entrenador no respondió a tiempo. Probá de nuevo.';
+    }
+    return friendlyError(err);
+  }
+
   function coach(workouts, today) {
     var c = sb();
     if (!c) return Promise.reject(new Error('No hay conexión con la nube ahora mismo.'));
@@ -139,13 +152,13 @@
           if (ctxRes && typeof ctxRes.json === 'function') {
             return ctxRes.json()
               .then(function (body) {
-                throw new Error((body && body.error) || friendlyError(r.error));
+                throw new Error((body && body.error) || coachError(r.error));
               })
               ['catch'](function (e) {
-                throw (e instanceof Error ? e : new Error(friendlyError(r.error)));
+                throw (e instanceof Error ? e : new Error(coachError(r.error)));
               });
           }
-          throw new Error(friendlyError(r.error));
+          throw new Error(coachError(r.error));
         }
         if (!r.data || (!r.data.recomendacion && !r.data.consejo)) {
           throw new Error(r.data && r.data.error ? r.data.error : 'La IA no devolvió nada.');
