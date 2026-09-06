@@ -52,6 +52,9 @@
       cloud: cloudUser,
       syncAge: settings.lastSync
         ? Math.max(0, Math.floor((Date.now() - new Date(settings.lastSync).getTime()) / 86400000))
+        : null,
+      backupAge: settings.lastExport
+        ? Math.max(0, Math.floor((Date.now() - new Date(settings.lastExport).getTime()) / 86400000))
         : null
     };
   }
@@ -602,6 +605,103 @@
     return 'download';
   }
 
+  /* ------------------------------------------------- exportar / importar
+     La cuenta en la nube ya guarda todo sola. Esto es el respaldo manual,
+     para quien quiera tener el archivo en su poder. */
+  function openExport() {
+    var json = JSON.stringify(store.exportData(), null, 2);
+    var c = ctx();
+    var name = 'gymlog-' + S.today() + '.json';
+
+    U.openSheet({
+      title: 'Exportar',
+      body:
+        '<p style="margin:0;font-size:14px;color:var(--text-dim)">' + c.workouts.length +
+        (c.workouts.length === 1 ? ' registro' : ' registros') + ' y ' + c.weights.length +
+        ' mediciones. Guardalo en Archivos, iCloud o donde prefieras.</p>' +
+        '<div class="btn-row">' +
+        '<button class="btn primary" id="x-share">' + icon('share') + 'Guardar</button>' +
+        '<button class="btn ghost" id="x-copy">Copiar</button>' +
+        '</div>' +
+        '<div class="field"><label for="x-text">Copia en texto</label>' +
+        '<textarea class="input" id="x-text" readonly style="min-height:140px;font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">' +
+        esc(json) + '</textarea>' +
+        '<span class="hint">Si el guardado no funciona en tu navegador, copiá este texto y pegalo en una nota.</span></div>',
+      onMount: function (sheet) {
+        sheet.querySelector('#x-share').addEventListener('click', function () {
+          deliverFile(name, new Blob([json], { type: 'application/json' }), 'application/json')
+            .then(function (r) { if (r !== 'cancel') store.markExported().then(function () { render(); }); });
+        });
+        sheet.querySelector('#x-copy').addEventListener('click', function () {
+          var ta = sheet.querySelector('#x-text');
+          var done = function () { U.toast('Copiado', 'ok'); store.markExported(); };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(json).then(done)['catch'](function () {
+              ta.select(); document.execCommand('copy'); done();
+            });
+          } else { ta.select(); document.execCommand('copy'); done(); }
+        });
+      }
+    });
+  }
+
+  function openImport() {
+    U.openSheet({
+      title: 'Importar',
+      body:
+        '<div class="callout is-flat" style="padding:12px 14px">' + icon('info') +
+        '<div><h3 style="font-size:13.5px">Elegí el modo</h3>' +
+        '<p style="font-size:12.5px">«Reemplazar» borra lo actual (se guarda una copia antes). «Combinar» añade.</p>' +
+        '</div></div>' +
+        '<div class="field"><label>Modo</label><div class="segmented" id="i-mode">' +
+        '<button type="button" data-mode="replace" class="is-active">Reemplazar</button>' +
+        '<button type="button" data-mode="merge">Combinar</button>' +
+        '</div></div>' +
+        '<div class="field"><label>Desde un archivo</label>' +
+        '<input class="input" type="file" id="i-file" accept="application/json,.json"></div>' +
+        '<div class="field"><label for="i-text">O pegá el texto</label>' +
+        '<textarea class="input" id="i-text" placeholder=\'{"app":"gymlog", …}\' style="min-height:110px;font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></div>',
+      footer: '<button class="btn primary block" id="i-go">' + icon('upload') + 'Importar</button>',
+      onMount: function (sheet) {
+        var mode = 'replace';
+        sheet.querySelector('#i-mode').addEventListener('click', function (e) {
+          var b = e.target.closest('[data-mode]');
+          if (!b) return;
+          mode = b.getAttribute('data-mode');
+          Array.prototype.forEach.call(this.children, function (x) { x.classList.toggle('is-active', x === b); });
+        });
+
+        function run(text) {
+          var payload;
+          try { payload = JSON.parse(text); }
+          catch (e) { U.toast('El texto no es un JSON válido', 'error'); return; }
+          /* importData está envuelto por el auto-sync, así que lo importado
+             sube solo a la cuenta. */
+          store.importData(payload, mode).then(function (r) {
+            U.closeSheet();
+            state.month = S.monthKey(S.today());
+            applyTheme(store.settings().theme);
+            render();
+            U.toast('Importados ' + r.workouts + ' registros', 'ok');
+            syncAchievements(false);
+          })['catch'](function (err) { U.toast(err.message, 'error'); });
+        }
+
+        sheet.querySelector('#i-go').addEventListener('click', function () {
+          var file = sheet.querySelector('#i-file').files[0];
+          var text = sheet.querySelector('#i-text').value.trim();
+          if (file) {
+            var fr = new FileReader();
+            fr.onload = function () { run(String(fr.result)); };
+            fr.onerror = function () { U.toast('No se pudo leer el archivo', 'error'); };
+            fr.readAsText(file);
+          } else if (text) run(text);
+          else U.toast('Elegí un archivo o pegá el texto', 'error');
+        });
+      }
+    });
+  }
+
   /* ------------------------------------------------- exportar / importar */
   /* ------------------------------------------------------- nube (Supabase)
      El login es obligatorio: sin sesión no hay app, solo la pantalla de
@@ -1024,6 +1124,9 @@
 
       case 'set-goal': openGoal(); break;
       case 'share-month': shareMonth(arg('month')); break;
+
+      case 'export': U.closeSheet(); setTimeout(openExport, 0); break;
+      case 'import': openImport(); break;
 
       case 'seed-demo':
         seedDemo().then(function () { render(); U.toast('Datos de ejemplo cargados', 'ok'); });

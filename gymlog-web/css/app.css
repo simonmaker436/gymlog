@@ -333,6 +333,10 @@ main {
   overflow: hidden;
 }
 .tiles.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* Para filas de exactamente dos datos: sin esto, en pantallas anchas la
+   rejilla se abre a cuatro columnas y las celdas sobrantes quedan como un
+   rectángulo oscuro vacío (se ve el fondo del contenedor). */
+.tiles.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 .tile {
   background: var(--surface);
@@ -1133,6 +1137,7 @@ button.row:hover { background: var(--surface-2); }
   :root { --content-max: 900px; }
   .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .tiles.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tiles.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 /* =========================================================================
    INTRO — "LOCK IN" y la mancuerna que lo aplasta

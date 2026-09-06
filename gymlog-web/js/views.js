@@ -186,12 +186,18 @@
       tile('Récord', String(st.best), 'mejor racha') +
       '</div>';
 
-    html += '<div class="tiles">' +
+    /* Tres celdas y tres datos: con solo dos, a partir de 1180px la rejilla
+       pasa a cuatro columnas y las que sobraban se veían como un rectángulo
+       oscuro vacío. La clase «three» fija tres columnas en todos los anchos. */
+    var doneTotal = S.done(ctx.workouts).length;
+    html += '<div class="tiles three">' +
       tile('Tiempo', S.formatDuration(month.minutes), month.count ? 'media ' + S.formatDuration(month.avgDuration) : 'sin datos') +
       tile('Siguiente', next ? (next === ctx.today ? 'Hoy'
         : S.daysBetween(ctx.today, next) === 1 ? 'Mañana'
           : esc(S.DAY_NAMES[S.dow(next)])) : '—',
         next ? esc(S.formatShort(next)) : 'define tus días en ajustes') +
+      tile('Totales', String(doneTotal),
+        doneTotal && ctx.eff ? 'desde el ' + esc(S.formatShort(ctx.eff)) : 'aún sin registros') +
       '</div>';
 
     /* ---- motivación */
@@ -306,7 +312,7 @@
           tile('Energía', w.energy + '<small>/5</small>') +
           tile('Sensación', w.feeling + '<small>/5</small>') +
           '</div>' +
-          '<div class="tiles" style="margin-top:8px">' +
+          '<div class="tiles two" style="margin-top:8px">' +
           tile('Dificultad', w.difficulty + '<small>/5</small>') +
           tile('Peso', w.weight != null ? fmtWeight(w.weight, ctx.settings.units) : NONE) +
           '</div>' +
@@ -929,6 +935,19 @@
       '<small>Forzar una subida, por si acaso.</small></div>' + icon('upload') + '</button>' +
       '<button class="row danger" data-act="cloud-logout"><div class="t"><b>Cerrar sesión</b>' +
       '<small>Volvés a la pantalla de acceso.</small></div></button>' +
+      '</div>';
+
+    /* ----------------------------------------------------- respaldo manual
+       La cuenta en la nube es el respaldo principal; esto es el extra para
+       quien quiera llevarse el archivo. */
+    html += sectionTitle('Copia manual');
+    html += '<div class="card flush">' +
+      '<button class="row" data-act="export"><div class="t"><b>Exportar a un archivo</b>' +
+      '<small>' + (s.lastExport
+        ? 'Última copia hace ' + (ctx.backupAge === 0 ? 'menos de un día' : ctx.backupAge + ' días')
+        : 'Un JSON con todo: sesiones, pesos y medidas.') + '</small></div>' + icon('share') + '</button>' +
+      '<button class="row" data-act="import"><div class="t"><b>Importar desde un archivo</b>' +
+      '<small>Recupera un JSON exportado antes.</small></div>' + icon('upload') + '</button>' +
       '</div>';
 
     html += sectionTitle('Datos');
