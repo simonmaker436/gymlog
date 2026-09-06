@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>GymLog — Registro de entrenamientos</title>
+<meta name="description" content="Registro personal de entrenamientos de gimnasio. Funciona sin conexión y guarda los datos en tu dispositivo.">
+<meta name="theme-color" content="#0A0C10">
+<meta name="color-scheme" content="light dark">
+
+<!-- PWA / iOS -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GymLog">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="css/app.css">
+<script>
+  (function () {
+    /* Se lee antes de pintar nada: si la intro está desactivada, no arranca. */
+    try {
+      if (localStorage.getItem('gymlog:intro') === '0') {
+        document.documentElement.classList.add('no-intro');
+      }
+    } catch (e) { }
+  })();
+</script>
+</head>
+<body>
+
+<!-- BOOT:START -->
+  <div id="boot" role="status" aria-label="LOCK IN">
+    <div class="intro-stripes"></div>
+    <div class="intro-glow"></div>
+    <div class="intro-vignette"></div>
+    <div class="intro-flash"></div>
+
+    <div class="intro-stage">
+      <div class="intro-word">
+        <svg class="intro-shadow" viewBox="0 0 940 200" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M0,0 H56 V148 H126 V200 H0 Z M182,0 H248 A42,42,0,0,1,290,42 V158 A42,42,0,0,1,248,200 H182 A42,42,0,0,1,140,158 V42 A42,42,0,0,1,182,0 Z M196,70 V130 A14,14,0,0,0,210,144 H220 A14,14,0,0,0,234,130 V70 A14,14,0,0,0,220,56 H210 A14,14,0,0,0,196,70 Z M450,0 H346 A42,42,0,0,0,304,42 V158 A42,42,0,0,0,346,200 H450 V144 H374 A14,14,0,0,1,360,130 V70 A14,14,0,0,1,374,56 H450 Z M464,0 H520 V62 L590,0 H616 L570,100 L616,200 H590 L520,138 V200 H464 Z M690,0 H750 V200 H690 Z M764,0 H820 L884,105 V0 H940 V200 H884 L820,95 V200 H764 Z"/></svg>
+        <svg class="intro-echo" viewBox="0 0 940 200" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M0,0 H56 V148 H126 V200 H0 Z M182,0 H248 A42,42,0,0,1,290,42 V158 A42,42,0,0,1,248,200 H182 A42,42,0,0,1,140,158 V42 A42,42,0,0,1,182,0 Z M196,70 V130 A14,14,0,0,0,210,144 H220 A14,14,0,0,0,234,130 V70 A14,14,0,0,0,220,56 H210 A14,14,0,0,0,196,70 Z M450,0 H346 A42,42,0,0,0,304,42 V158 A42,42,0,0,0,346,200 H450 V144 H374 A14,14,0,0,1,360,130 V70 A14,14,0,0,1,374,56 H450 Z M464,0 H520 V62 L590,0 H616 L570,100 L616,200 H590 L520,138 V200 H464 Z M690,0 H750 V200 H690 Z M764,0 H820 L884,105 V0 H940 V200 H884 L820,95 V200 H764 Z"/></svg>
+        <svg class="intro-fill" viewBox="0 0 940 200" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M0,0 H56 V148 H126 V200 H0 Z M182,0 H248 A42,42,0,0,1,290,42 V158 A42,42,0,0,1,248,200 H182 A42,42,0,0,1,140,158 V42 A42,42,0,0,1,182,0 Z M196,70 V130 A14,14,0,0,0,210,144 H220 A14,14,0,0,0,234,130 V70 A14,14,0,0,0,220,56 H210 A14,14,0,0,0,196,70 Z M450,0 H346 A42,42,0,0,0,304,42 V158 A42,42,0,0,0,346,200 H450 V144 H374 A14,14,0,0,1,360,130 V70 A14,14,0,0,1,374,56 H450 Z M464,0 H520 V62 L590,0 H616 L570,100 L616,200 H590 L520,138 V200 H464 Z M690,0 H750 V200 H690 Z M764,0 H820 L884,105 V0 H940 V200 H884 L820,95 V200 H764 Z"/></svg>
+      </div>
+
+      <div class="intro-charge"><i></i></div>
+
+      <div class="intro-shock"></div>
+      <i class="intro-streak" style="--d:-1;--o:-26px;--l:180px;animation-delay:2.300s"></i>
+      <i class="intro-streak" style="--d:-1;--o:4px;--l:240px;animation-delay:2.330s"></i>
+      <i class="intro-streak" style="--d:-1;--o:30px;--l:200px;animation-delay:2.360s"></i>
+      <i class="intro-streak" style="--d:1;--o:-26px;--l:180px;animation-delay:2.300s"></i>
+      <i class="intro-streak" style="--d:1;--o:4px;--l:240px;animation-delay:2.330s"></i>
+      <i class="intro-streak" style="--d:1;--o:30px;--l:200px;animation-delay:2.360s"></i>
+      <i class="intro-debris" style="--x:-186px;--y:-13px;--r:-180deg;width:13px;height:5px;animation-delay:2.300s"></i>
+      <i class="intro-debris" style="--x:-141px;--y:-46px;--r:270deg;width:8px;height:3px;animation-delay:2.320s"></i>
+      <i class="intro-debris" style="--x:-98px;--y:-61px;--r:-360deg;width:5px;height:3px;animation-delay:2.340s"></i>
+      <i class="intro-debris" style="--x:-64px;--y:-66px;--r:450deg;width:18px;height:5px;animation-delay:2.360s"></i>
+      <i class="intro-debris" style="--x:-64px;--y:-111px;--r:-540deg;width:13px;height:3px;animation-delay:2.380s"></i>
+      <i class="intro-debris" style="--x:-28px;--y:-96px;--r:180deg;width:8px;height:3px;animation-delay:2.400s"></i>
+      <i class="intro-debris" style="--x:-5px;--y:-138px;--r:-270deg;width:5px;height:5px;animation-delay:2.300s"></i>
+      <i class="intro-debris" style="--x:22px;--y:-102px;--r:360deg;width:18px;height:3px;animation-delay:2.320s"></i>
+      <i class="intro-debris" style="--x:53px;--y:-108px;--r:-450deg;width:13px;height:3px;animation-delay:2.340s"></i>
+      <i class="intro-debris" style="--x:62px;--y:-74px;--r:540deg;width:8px;height:5px;animation-delay:2.360s"></i>
+      <i class="intro-debris" style="--x:118px;--y:-86px;--r:-180deg;width:5px;height:3px;animation-delay:2.380s"></i>
+      <i class="intro-debris" style="--x:148px;--y:-60px;--r:270deg;width:18px;height:3px;animation-delay:2.400s"></i>
+      <i class="intro-debris" style="--x:190px;--y:-27px;--r:-360deg;width:13px;height:5px;animation-delay:2.300s"></i>
+      <i class="intro-debris" style="--x:-69px;--y:-28px;--r:450deg;width:8px;height:3px;animation-delay:2.320s"></i>
+      <i class="intro-debris" style="--x:69px;--y:-40px;--r:-540deg;width:5px;height:3px;animation-delay:2.340s"></i>
+      <i class="intro-debris" style="--x:-29px;--y:-165px;--r:180deg;width:18px;height:5px;animation-delay:2.360s"></i>
+
+      <div class="intro-bar"><svg viewBox="0 0 400 100" fill="currentColor" aria-hidden="true">
+          <rect x="96" y="40" width="208" height="20" rx="10"/>
+          <rect x="76" y="22" width="26" height="56" rx="10"/>
+          <rect x="298" y="22" width="26" height="56" rx="10"/>
+          <rect x="40" y="8" width="32" height="84" rx="13"/>
+          <rect x="328" y="8" width="32" height="84" rx="13"/>
+          <rect x="24" y="30" width="14" height="40" rx="7"/>
+          <rect x="362" y="30" width="14" height="40" rx="7"/>
+        </svg></div>
+      <div class="intro-mark">GymLog</div>
+    </div>
+
+    <span class="skip">Toca para saltar</span>
+  </div>
+  <!-- BOOT:END -->
+<div class="app" id="app"></div>
+
+<script src="js/stats.js"></script>
+<script src="js/achievements.js"></script>
+<script src="js/demo.js"></script>
+<script src="js/store.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/views.js"></script>
+<script src="js/app.js"></script>
+<script>
+  /* El service worker solo funciona sobre http(s). Si se abre el archivo
+     directamente (file://) o dentro de un visor con restricciones, la app
+     sigue funcionando igual: los datos están en IndexedDB, no en la red. */
+  if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () { /* sin offline, sin drama */ });
+    });
+  }
+</script>
+</body>
+</html>
