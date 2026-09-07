@@ -14,6 +14,13 @@
     { id: 'history', label: 'Historial', icon: 'history', title: 'Historial' }
   ];
 
+  /* Pantallas a las que se entra desde otra, no desde la barra de pestañas:
+     llevan flecha de volver y su propio título. */
+  var SUBVIEWS = {
+    settings: { title: 'Ajustes' },
+    evolution: { title: 'Evolución' }
+  };
+
   var state = {
     view: 'home',
     month: S.monthKey(S.today()),
@@ -51,6 +58,8 @@
       eff: S.effectiveStart(settings.startDate, workouts),
       hasDemo: store.hasDemo(),
       cloud: cloudUser,
+      hour: new Date().getHours(),
+      photos: photoState,
       coach: settings.coach,
       coachState: coachState,
       coachMin: COACH_MIN_WORKOUTS,
@@ -86,6 +95,8 @@
     state.view = view;
     render();
     window.scrollTo({ top: 0 });
+    // las fotos se piden al entrar, no al abrir la app
+    if (view === 'evolution') loadPhotos(false);
   }
 
   function render(keepFocus) {
@@ -97,13 +108,14 @@
 
     var c = ctx();
     var def = VIEWS.find(function (v) { return v.id === state.view; });
-    var out = state.view === 'settings' ? GL.views.settings(c) : GL.views[state.view](c);
+    var sub = SUBVIEWS[state.view];      // pantallas que no son pestaña
+    var out = GL.views[state.view](c);
 
     main.innerHTML = '<div class="screen">' + out.html + '</div>';
 
     document.getElementById('topbar-title').textContent =
-      state.view === 'settings' ? 'Ajustes' : (def ? def.title : '');
-    document.getElementById('topbar-back').classList.toggle('hidden', state.view !== 'settings');
+      sub ? sub.title : (def ? def.title : '');
+    document.getElementById('topbar-back').classList.toggle('hidden', !sub);
     document.getElementById('topbar-settings').classList.toggle('hidden', state.view === 'settings');
 
     Array.prototype.forEach.call(document.querySelectorAll('[data-tab-id]'), function (el) {
@@ -844,6 +856,109 @@
       });
   }
 
+  /* ------------------------------------------------- fotos de progreso
+     Las fotos viven en Supabase Storage y solo se acceden por la Edge
+     Function, que saca el id de usuario del token. Acá solo se guarda lo que
+     hace falta para pintar: la lista con URLs firmadas y el estado. */
+  var photoState = { loading: false, list: null, error: null, opining: false, opinion: null, opinionError: null };
+
+  function loadPhotos(force) {
+    if (!cloudUser) return Promise.resolve();
+    if (photoState.loading) return Promise.resolve();
+    if (photoState.list && !force) return Promise.resolve();
+    photoState.loading = true;
+    photoState.error = null;
+    render();
+    return GL.cloud.listPhotos().then(function (list) {
+      photoState.loading = false;
+      photoState.list = list;
+      render();
+    })['catch'](function (err) {
+      photoState.loading = false;
+      photoState.error = err.message || 'No se pudieron cargar las fotos.';
+      render();
+    });
+  }
+
+  /* Antes de subir se reduce a 1600px de lado mayor y se recomprime: una foto
+     de móvil son varios MB y no hace falta tanto para comparar progreso. */
+  function shrinkImage(file) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        var max = 1600;
+        var w = img.naturalWidth, h = img.naturalHeight;
+        var scale = Math.min(1, max / Math.max(w, h));
+        var cv = document.createElement('canvas');
+        cv.width = Math.round(w * scale);
+        cv.height = Math.round(h * scale);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        cv.toBlob(function (blob) {
+          resolve(blob ? new File([blob], 'foto.jpg', { type: 'image/jpeg' }) : file);
+        }, 'image/jpeg', 0.85);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  function addPhoto() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    /* En el móvil abre la cámara directamente; en escritorio, el selector. */
+    input.setAttribute('capture', 'environment');
+    input.addEventListener('change', function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      U.toast('Subiendo foto…');
+      shrinkImage(file)
+        .then(function (small) { return GL.cloud.uploadPhoto(small, S.today()); })
+        .then(function () { return loadPhotos(true); })
+        .then(function () { U.toast('Foto guardada', 'ok'); })
+        ['catch'](function (err) { U.toast(err.message || 'No se pudo subir', 'error'); });
+    });
+    input.click();
+  }
+
+  function openPhoto(path) {
+    var f = (photoState.list || []).find(function (x) { return x.path === path; });
+    if (!f) return;
+    U.openSheet({
+      title: S.capitalize(S.formatLong(f.date)),
+      body: '<img class="shot-big" src="' + esc(f.url) + '" alt="Foto del ' + esc(f.date) + '">',
+      footer: '<button class="btn danger block" data-act="photo-del" data-path="' + esc(f.path) + '">' +
+        icon('trash') + 'Eliminar foto</button>'
+    });
+  }
+
+  function deletePhoto(path) {
+    U.closeSheet();
+    U.toast('Eliminando…');
+    GL.cloud.deletePhoto(path)
+      .then(function () { return loadPhotos(true); })
+      .then(function () { U.toast('Foto eliminada', 'ok'); })
+      ['catch'](function (err) { U.toast(err.message || 'No se pudo eliminar', 'error'); });
+  }
+
+  function opinePhotos() {
+    if (photoState.opining) return;
+    photoState.opining = true;
+    photoState.opinionError = null;
+    render();
+    GL.cloud.opinePhotos().then(function (d) {
+      photoState.opining = false;
+      photoState.opinion = { recomendacion: d.recomendacion || '', consejo: d.consejo || '' };
+      render();
+    })['catch'](function (err) {
+      photoState.opining = false;
+      photoState.opinionError = err.message || 'No se pudo analizar.';
+      render();
+    });
+  }
+
   function cloudSync() {
     if (!cloudUser) return;
     U.toast('Sincronizando…');
@@ -1095,6 +1210,95 @@
     }, 'image/png');
   }
 
+  /* ------------------------------------------- tarjeta de progreso general
+     Los mismos números que ya calcula Progreso: racha, totales, tiempo y las
+     marcas personales. Nada nuevo que mantener, solo otra forma de verlos. */
+  function shareCard() {
+    var c = ctx();
+    var g = c.settings.gymDays;
+    var o = S.overall(c.workouts, g, c.today, c.start, c.win);
+    var st = S.streaks(c.workouts, g, c.today, c.start, c.win);
+    var rec = S.records(c.workouts, g, c.today, c.start, c.win);
+
+    var W = 1080, H = 1350;
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var x = cv.getContext('2d');
+    var css = getComputedStyle(document.documentElement);
+    var col = function (n, fb) { return (css.getPropertyValue(n) || '').trim() || fb; };
+
+    var bg = col('--bg', '#0A0C10'), fg = col('--text', '#F5F7FB');
+    var accent = col('--accent', '#FF5A2B'), muted = col('--text-muted', '#626B7C');
+    var line = col('--border', '#1F242E');
+    var F = function (size, weight) {
+      return weight + ' ' + size + 'px "Barlow Condensed", -apple-system, "Arial Narrow", sans-serif';
+    };
+
+    x.fillStyle = bg; x.fillRect(0, 0, W, H);
+    x.strokeStyle = line; x.lineWidth = 2;
+    for (var i = -H; i < W; i += 46) {
+      x.beginPath(); x.moveTo(i, H); x.lineTo(i + H * 0.45, 0); x.stroke();
+    }
+
+    x.fillStyle = accent; x.fillRect(80, 140, 120, 10);
+    x.fillStyle = fg; x.font = F(96, 800);
+    x.fillText('MI PROGRESO', 80, 268);
+    x.fillStyle = muted; x.font = F(36, 600);
+    x.fillText(
+      (c.eff ? 'DESDE EL ' + S.formatShort(c.eff).toUpperCase() : '') + '   ·   ' +
+      S.formatShort(c.today).toUpperCase(), 80, 320);
+
+    /* dos columnas de cifras grandes */
+    var big = [
+      ['Racha actual', String(st.current)],
+      ['Mejor racha', String(st.best)],
+      ['Entrenamientos', String(o.total)],
+      ['Tiempo total', S.formatDuration(o.minutes)]
+    ];
+    var bx = 80, by = 430;
+    big.forEach(function (r, n) {
+      var cx = bx + (n % 2) * ((W - 160) / 2);
+      var cy = by + Math.floor(n / 2) * 260;
+      x.fillStyle = muted; x.font = F(34, 700);
+      x.fillText(r[0].toUpperCase(), cx, cy);
+      x.fillStyle = (n === 0) ? accent : fg;
+      x.font = F(130, 800);
+      x.fillText(r[1], cx, cy + 128);
+    });
+
+    x.strokeStyle = line; x.lineWidth = 2;
+    x.beginPath(); x.moveTo(80, 960); x.lineTo(W - 80, 960); x.stroke();
+
+    /* marcas personales, en línea */
+    var marcas = [];
+    if (rec.longestSession) {
+      marcas.push(['Sesión más larga', S.formatDuration(rec.longestSession.duration)]);
+    }
+    if (rec.bestMonth) marcas.push(['Mejor mes', rec.bestMonth.count + ' sesiones']);
+    if (o.attendance.scheduled) marcas.push(['Asistencia', o.attendance.pct + '%']);
+
+    var my = 1035;
+    marcas.slice(0, 3).forEach(function (r) {
+      x.fillStyle = muted; x.font = F(34, 700);
+      x.fillText(r[0].toUpperCase(), 80, my);
+      x.fillStyle = fg; x.font = F(46, 700);
+      var w = x.measureText(r[1]).width;
+      x.fillText(r[1], W - 80 - w, my);
+      my += 66;
+    });
+
+    x.fillStyle = accent; x.font = F(44, 800);
+    x.fillText('GYMLOG', 80, H - 90);
+    var nombre = (c.settings.name || '').toUpperCase();
+    x.fillStyle = muted; x.font = F(34, 600);
+    x.fillText(nombre, W - 80 - x.measureText(nombre).width, H - 90);
+
+    cv.toBlob(function (blob) {
+      if (!blob) { U.toast('No se pudo generar la imagen', 'error'); return; }
+      deliverFile('gymlog-progreso-' + S.today() + '.png', blob, 'image/png');
+    }, 'image/png');
+  }
+
   /* --------------------------------------------------------- demo / wipe */
   function seedDemo() {
     var s = store.settings();
@@ -1162,6 +1366,12 @@
         break;
       case 'cloud-sync': cloudSync(); break;
       case 'coach-refresh': fetchCoach(true); break;
+
+      case 'photo-add': addPhoto(); break;
+      case 'photo-open': openPhoto(arg('path')); break;
+      case 'photo-del': deletePhoto(arg('path')); break;
+      case 'photo-opine': opinePhotos(); break;
+      case 'share-card': shareCard(); break;
 
       case 'auth-mode': {
         // conserva lo ya escrito al cambiar entre crear cuenta e iniciar sesión
@@ -1364,6 +1574,15 @@
         var n = parseInt(value, 10);
         if (!(n >= 1 && n <= 31)) { U.toast('Entre 1 y 31', 'error'); el.value = store.settings().goal; return; }
         value = n;
+      }
+      if (key === 'reminderHour') {
+        var rh = parseInt(value, 10);
+        if (!(rh >= 0 && rh <= 23)) {
+          U.toast('Una hora entre 0 y 23', 'error');
+          el.value = store.settings().reminderHour;
+          return;
+        }
+        value = rh;
       }
       if (key === 'weeklyGoal') {
         /* vacío es válido y significa «los días que tenga programados» */

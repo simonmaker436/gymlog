@@ -169,6 +169,7 @@
     units: 'kg',
     theme: 'dark',       // es un cuaderno de gimnasio: oscuro de fábrica
     reminders: true,
+    reminderHour: 17,         // desde qué hora avisar si hoy toca y no registraste
     demoSeeded: false,
     onboarded: false,         // ya completó la encuesta inicial de perfil
     age: null,
@@ -258,6 +259,9 @@
     }
     if (!BODY_GOALS.some(function (g) { return g.key === out.bodyGoal; })) out.bodyGoal = null;
     if (out.lastSync && isNaN(Date.parse(out.lastSync))) out.lastSync = null;
+
+    var rh = Math.round(Number(out.reminderHour));
+    out.reminderHour = (isNaN(rh) || rh < 0 || rh > 23) ? 17 : rh;
 
     /* Solo se acepta un consejo con la forma esperada; cualquier otra cosa
        se descarta y se vuelve a pedir. */

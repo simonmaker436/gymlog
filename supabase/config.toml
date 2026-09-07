@@ -5,3 +5,9 @@ project_id = "dfvidkbcnvngnskswirs"
 # alguien con sesión iniciada en la app. supabase.functions.invoke manda el
 # token del usuario solo.
 enabled = true
+
+[functions.photos]
+# verify_jwt en true (por defecto). Además la función revalida el token
+# contra /auth/v1/user para sacar el id de usuario, que es lo que aísla las
+# fotos: nunca se confía en un id que venga en el cuerpo.
+enabled = true

@@ -733,6 +733,88 @@ main {
 }
 .coach-err { color: var(--miss); }
 
+/* --------------------------------------- entrada a Evolución (Inicio) */
+.card.evocard {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; text-align: left;
+  transition: border-color .16s ease, background .16s ease;
+}
+.card.evocard:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.evocard-ic { line-height: 0; color: var(--accent); flex: none; }
+.evocard-ic .ic { width: 22px; height: 22px; }
+.card.evocard .t { flex: 1; min-width: 0; display: block; }
+.card.evocard .t b {
+  display: block;
+  font-family: var(--font-cond);
+  font-size: 17px; font-weight: 800;
+  letter-spacing: .08em; text-transform: uppercase;
+}
+.card.evocard .t small {
+  display: block; margin-top: 3px;
+  font-size: 12.5px; color: var(--text-muted);
+}
+.card.evocard > .ic { width: 18px; height: 18px; color: var(--text-muted); flex: none; }
+
+/* ------------------------------------ recordatorio del día de entreno */
+.card.remind {
+  display: flex; align-items: center; gap: 13px;
+  border-left: 2px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface));
+}
+.remind-ic { line-height: 0; color: var(--warn); flex: none; }
+.remind-ic .ic { width: 20px; height: 20px; }
+.remind-t { flex: 1; min-width: 0; }
+.remind-t b {
+  display: block;
+  font-family: var(--font-cond);
+  font-size: 16px; font-weight: 800;
+  letter-spacing: .07em; text-transform: uppercase;
+}
+.remind-t small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--text-muted); }
+.card.remind .btn { flex: none; }
+
+/* --------------------------------------------- fotos de progreso */
+.shots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.shot {
+  position: relative;
+  display: block;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--r-2);
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.shot-d {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 14px 6px 5px;
+  background: linear-gradient(to top, rgba(0, 0, 0, .82), transparent);
+  font-family: var(--font-cond);
+  font-size: 11.5px; font-weight: 700;
+  letter-spacing: .07em; text-transform: uppercase;
+  color: #fff;
+  text-align: center;
+}
+.shot:hover { border-color: var(--accent); }
+.shot-big {
+  display: block;
+  width: 100%;
+  max-height: 68vh;
+  object-fit: contain;
+  border-radius: var(--r-2);
+  background: var(--surface-2);
+}
+@media (min-width: 620px) {
+  .shots { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 900px) {
+  .shots { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
 /* ------------------------------------------- barra de la meta semanal */
 .wgoal { margin-top: 16px; }
 .wgoal-top { display: flex; align-items: baseline; gap: 8px; }

@@ -40,6 +40,27 @@
       '</div>';
   }
 
+  /* --------------------------------------------- recordatorio del día
+     Aviso dentro de la app, no notificación del sistema. Aparece solo si hoy
+     toca gimnasio, todavía no registraste nada y ya pasó la hora fijada en
+     Ajustes: recordarlo a las 8 de la mañana no sirve de nada. */
+  function reminderBanner(ctx) {
+    var s = ctx.settings;
+    if (!s.reminders) return '';
+    if (!S.isScheduled(ctx.today, s.gymDays)) return '';
+    if (ctx.byDate[ctx.today]) return '';               // ya hay registro de hoy
+    if (ctx.hour < s.reminderHour) return '';
+
+    return '<div class="card remind">' +
+      '<span class="remind-ic">' + icon('alert') + '</span>' +
+      '<div class="remind-t">' +
+      '<b>Hoy toca gimnasio</b>' +
+      '<small>Son las ' + String(ctx.hour).padStart(2, '0') + ':00 y todavía no registraste nada.</small>' +
+      '</div>' +
+      '<button class="btn sm primary" data-act="log" data-date="' + ctx.today + '">Registrar</button>' +
+      '</div>';
+  }
+
   /* ------------------------------------------------- entrenador con IA
      Con pocas sesiones no hay patrón que leer, así que la tarjeta ni aparece
      (y el cliente tampoco llama a la función: no se gasta cuota en balde). */
@@ -262,8 +283,18 @@
         doneTotal && ctx.eff ? 'desde el ' + esc(S.formatShort(ctx.eff)) : 'aún sin registros') +
       '</div>';
 
+    /* ---- recordatorio del día de entreno */
+    html += reminderBanner(ctx);
+
     /* ---- entrenador con IA */
     html += coachCard(ctx);
+
+    /* ---- entrada a Evolución */
+    html += '<button class="card evocard" data-act="go" data-view="evolution">' +
+      '<span class="evocard-ic">' + icon('image') + '</span>' +
+      '<span class="t"><b>Evolución</b>' +
+      '<small>Fotos de progreso y tarjeta para compartir.</small></span>' +
+      icon('right') + '</button>';
 
     /* ---- motivación */
     if (st.current >= 3) {
@@ -326,6 +357,74 @@
         : '') +
       (w.notes ? '<div class="note"' + (fullNote ? ' style="-webkit-line-clamp:none"' : '') + '>' + esc(w.notes) + '</div>' : '') +
       '</button>';
+  }
+
+  /* ============================================================= EVOLUCIÓN
+     Dos cosas: la línea de tiempo de fotos (que viven en Supabase Storage,
+     no acá) y la tarjeta para compartir. El estado de carga lo lleva app.js
+     y llega en ctx.photos. */
+  function evolution(ctx) {
+    var p = ctx.photos || {};
+    var html = '';
+
+    html += sectionTitle('Fotos de progreso');
+
+    html += '<div class="card flush">' +
+      '<button class="row" data-act="photo-add"><div class="t"><b>Sacar o subir una foto</b>' +
+      '<small>Se guarda con la fecha de hoy, solo en tu cuenta.</small></div>' +
+      icon('plus') + '</button>' +
+      '</div>';
+
+    if (p.loading) {
+      html += '<div class="card"><p class="muted" style="margin:0;font-size:13.5px">Cargando tus fotos…</p></div>';
+    } else if (p.error) {
+      html += '<div class="card"><p class="coach-err" style="margin:0">' + esc(p.error) + '</p></div>';
+    } else if (!p.list || !p.list.length) {
+      html += '<div class="card"><div class="empty" style="padding:26px 12px">' + icon('image') +
+        '<h3>Sin fotos todavía</h3>' +
+        '<p>La primera es el punto de partida. Sacala con la misma luz y el mismo ángulo que vayas a repetir.</p>' +
+        '</div></div>';
+    } else {
+      html += '<div class="card"><div class="shots">' + p.list.map(function (f) {
+        return '<button class="shot" data-act="photo-open" data-path="' + esc(f.path) + '">' +
+          '<img src="' + esc(f.url) + '" alt="Foto del ' + esc(f.date) + '" loading="lazy">' +
+          '<span class="shot-d">' + esc(S.formatShort(f.date)) + '</span>' +
+          '</button>';
+      }).join('') + '</div>' +
+        '<p class="muted" style="margin:12px 0 0;font-size:12.5px">' +
+        p.list.length + (p.list.length === 1 ? ' foto' : ' fotos') +
+        ' · de la más nueva a la más vieja</p></div>';
+
+      /* La opinión de la IA compara la última con las anteriores, así que con
+         una sola foto no hay nada que comparar. */
+      html += '<div class="card coach">' +
+        '<div class="coach-head">' +
+        '<span class="eyebrow">Qué ve la IA</span><span class="spacer"></span>' +
+        '<button class="btn sm subtle" data-act="photo-opine"' + (p.opining ? ' disabled' : '') + '>' +
+        icon('bolt') + (p.opining ? 'Mirando…' : 'Analizar') + '</button>' +
+        '</div>' +
+        (p.opining
+          ? '<p class="coach-wait">Comparando tus fotos…</p>'
+          : p.opinionError
+            ? '<p class="coach-err">' + esc(p.opinionError) + '</p>'
+            : p.opinion
+              ? '<p class="coach-main">' + esc(p.opinion.recomendacion) + '</p>' +
+              (p.opinion.consejo ? '<p class="coach-tip">' + esc(p.opinion.consejo) + '</p>' : '')
+              : '<p class="coach-wait">' + (p.list.length === 1
+                ? 'Con una sola foto no hay comparación posible todavía. Igual podés pedirle que la mire.'
+                : 'Compara tu última foto con las anteriores.') + '</p>') +
+        '</div>';
+    }
+
+    html += sectionTitle('Tarjeta para compartir');
+    html += '<div class="card">' +
+      '<p class="muted" style="margin:0 0 14px;font-size:13.5px">' +
+      'Una imagen con tu racha, tus totales y tus marcas, lista para guardar.</p>' +
+      '<div class="btn-row">' +
+      '<button class="btn primary" data-act="share-card">' + icon('image') + 'Generar</button>' +
+      '</div></div>';
+
+    return { html: html };
   }
 
   /* ============================================================ CALENDARIO */
@@ -1068,6 +1167,13 @@
       '<button class="row" data-act="toggle-reminders"><div class="t"><b>Recordatorios</b>' +
       '<small>Aviso en Inicio los días que toca gimnasio.</small></div>' +
       '<span class="switch' + (s.reminders ? ' on' : '') + '" role="switch" aria-checked="' + !!s.reminders + '"></span></button>' +
+      (s.reminders
+        ? '<div class="row" style="flex-direction:column;align-items:stretch;gap:8px">' +
+        '<div class="field" style="gap:6px"><label for="set-rhour">Avisar a partir de las</label>' +
+        '<input class="input" type="number" id="set-rhour" data-set="reminderHour" min="0" max="23" value="' + s.reminderHour + '">' +
+        '<span class="hint">Hora del día. Antes de esa hora no molesta, porque todavía hay tiempo de ir.</span>' +
+        '</div></div>'
+        : '') +
       '<button class="row" data-act="toggle-intro"><div class="t"><b>Intro al abrir</b>' +
       '<small>La animación LOCK IN.</small></div>' +
       '<span class="switch' + (s.intro ? ' on' : '') + '" role="switch" aria-checked="' + !!s.intro + '"></span></button>' +
@@ -1134,6 +1240,7 @@
 
   GL.views = {
     home: home, calendar: calendar, history: history, progress: progress, settings: settings,
+    evolution: evolution,
     entryCard: entryCard, fmtWeight: fmtWeight, fmtCm: fmtCm, fmtAvg: fmtAvg, fmtPct: fmtPct, dec: dec,
     statusPill: statusPill, tile: tile, weekDots: weekDots, sectionTitle: sectionTitle,
     goalRing: goalRing, typeValue: typeValue, NONE: NONE

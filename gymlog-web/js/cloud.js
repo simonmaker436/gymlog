@@ -167,6 +167,56 @@
       });
   }
 
+  /* ------------------------------------------------------------- fotos
+     Todo pasa por la Edge Function «photos»: el navegador nunca toca el
+     bucket directamente ni conoce su nombre. El id de usuario lo saca la
+     función del token, así que desde acá no hay forma de pedir las fotos de
+     otra cuenta. */
+  function photosCall(action, extra) {
+    var c = sb();
+    if (!c) return Promise.reject(new Error('No hay conexión con la nube ahora mismo.'));
+    var body = Object.assign({ action: action }, extra || {});
+    return c.functions.invoke('photos', { body: body }).then(function (r) {
+      if (r.error) {
+        var ctxRes = r.error.context;
+        if (ctxRes && typeof ctxRes.json === 'function') {
+          return ctxRes.json()
+            .then(function (b) { throw new Error((b && b.error) || coachError(r.error)); })
+            ['catch'](function (e) {
+              throw (e instanceof Error ? e : new Error(coachError(r.error)));
+            });
+        }
+        throw new Error(coachError(r.error));
+      }
+      if (r.data && r.data.error) throw new Error(r.data.error);
+      return r.data;
+    });
+  }
+
+  function listPhotos() {
+    return photosCall('list').then(function (d) { return (d && d.photos) || []; });
+  }
+
+  /* Se pide una URL firmada de subida y se sube el archivo directo ahí: así
+     la foto no viaja en base64 por el cuerpo de la función. */
+  function uploadPhoto(file, date) {
+    return photosCall('upload-url', { date: date, name: file.name || 'foto.jpg' })
+      .then(function (d) {
+        if (!d || !d.uploadUrl) throw new Error('No se pudo preparar la subida.');
+        return fetch(d.uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': file.type || 'image/jpeg' },
+          body: file
+        }).then(function (res) {
+          if (!res.ok) throw new Error('No se pudo subir la foto.');
+          return d.path;
+        });
+      });
+  }
+
+  function deletePhoto(path) { return photosCall('delete', { path: path }); }
+  function opinePhotos() { return photosCall('opine'); }
+
   var LAST_USER_KEY = 'gymlog:lastCloudUser';
   function lastUserId() {
     try { return localStorage.getItem(LAST_USER_KEY); } catch (e) { return null; }
@@ -185,6 +235,10 @@
     signOut: signOut,
     push: push,
     pull: pull,
-    coach: coach
+    coach: coach,
+    listPhotos: listPhotos,
+    uploadPhoto: uploadPhoto,
+    deletePhoto: deletePhoto,
+    opinePhotos: opinePhotos
   };
 })(window.GL = window.GL || {});
