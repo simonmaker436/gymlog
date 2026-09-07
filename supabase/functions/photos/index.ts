@@ -18,15 +18,15 @@ const BUCKET = "progress";
 const MAX_BYTES = 6 * 1024 * 1024; // 6 MB por foto
 const SIGNED_TTL = 3600;
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+/* Se leen al usarlas, no al cargar el módulo: así las pruebas pueden
+   prepararlas antes de llamar, y un despliegue sin variables falla con un
+   mensaje claro en vez de con cadenas vacías. */
+const url = () => Deno.env.get("SUPABASE_URL") ?? "";
+const serviceKey = () => Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
 function svc(extra: Record<string, string> = {}) {
-  return {
-    "Authorization": `Bearer ${SERVICE_KEY}`,
-    "apikey": SERVICE_KEY,
-    ...extra,
-  };
+  const k = serviceKey();
+  return { "Authorization": `Bearer ${k}`, "apikey": k, ...extra };
 }
 
 /* ------------------------------------------------------- quién llama
@@ -36,8 +36,8 @@ async function userIdFrom(req: Request): Promise<string | null> {
   const auth = req.headers.get("Authorization") ?? "";
   if (!auth.toLowerCase().startsWith("bearer ")) return null;
   try {
-    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { "Authorization": auth, "apikey": SERVICE_KEY },
+    const r = await fetch(`${url()}/auth/v1/user`, {
+      headers: { "Authorization": auth, "apikey": serviceKey() },
     });
     if (!r.ok) return null;
     const u = await r.json();
@@ -47,13 +47,21 @@ async function userIdFrom(req: Request): Promise<string | null> {
   }
 }
 
-/* El bucket se crea solo la primera vez. Privado y sin políticas. */
-async function ensureBucket(): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/storage/v1/bucket/${BUCKET}`, {
+/* El bucket se crea solo la primera vez. Privado y sin políticas: nadie que
+   no sea esta función (con la service role) puede leerlo ni listarlo.
+   Se memoriza para no consultarlo en cada petición. */
+let bucketListo: Promise<void> | null = null;
+function ensureBucket(): Promise<void> {
+  if (!bucketListo) bucketListo = crearBucket();
+  return bucketListo;
+}
+
+async function crearBucket(): Promise<void> {
+  const r = await fetch(`${url()}/storage/v1/bucket/${BUCKET}`, {
     headers: svc(),
   });
   if (r.ok) { await r.body?.cancel(); return; }
-  await fetch(`${SUPABASE_URL}/storage/v1/bucket`, {
+  await fetch(`${url()}/storage/v1/bucket`, {
     method: "POST",
     headers: svc({ "Content-Type": "application/json" }),
     body: JSON.stringify({
@@ -76,7 +84,7 @@ interface Foto {
 /* Las fotos de un usuario, de más nueva a más vieja. La fecha va en el
    nombre del archivo, así el orden no depende de metadatos. */
 async function listar(userId: string): Promise<Foto[]> {
-  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/list/${BUCKET}`, {
+  const r = await fetch(`${url()}/storage/v1/object/list/${BUCKET}`, {
     method: "POST",
     headers: svc({ "Content-Type": "application/json" }),
     body: JSON.stringify({
@@ -100,18 +108,18 @@ async function listar(userId: string): Promise<Foto[]> {
 }
 
 async function firmar(path: string): Promise<string | null> {
-  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${BUCKET}/${path}`, {
+  const r = await fetch(`${url()}/storage/v1/object/sign/${BUCKET}/${path}`, {
     method: "POST",
     headers: svc({ "Content-Type": "application/json" }),
     body: JSON.stringify({ expiresIn: SIGNED_TTL }),
   });
   if (!r.ok) { await r.text(); return null; }
   const d = await r.json();
-  return d?.signedURL ? `${SUPABASE_URL}/storage/v1${d.signedURL}` : null;
+  return d?.signedURL ? `${url()}/storage/v1${d.signedURL}` : null;
 }
 
 async function descargarB64(path: string): Promise<Img | null> {
-  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
+  const r = await fetch(`${url()}/storage/v1/object/${BUCKET}/${path}`, {
     headers: svc(),
   });
   if (!r.ok) { await r.text(); return null; }
@@ -162,9 +170,13 @@ export async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Método no permitido." }, 405);
 
-  if (!SUPABASE_URL || !SERVICE_KEY) {
+  if (!url() || !serviceKey()) {
     return json({ error: "La función no tiene acceso a Storage." }, 500);
   }
+
+  /* El bucket es infraestructura, no dato de nadie: se asegura antes de mirar
+     quién llama, así existe (vacío y privado) desde el primer despliegue. */
+  await ensureBucket();
 
   const userId = await userIdFrom(req);
   if (!userId) return json({ error: "Necesitás iniciar sesión." }, 401);
@@ -176,7 +188,6 @@ export async function handle(req: Request): Promise<Response> {
     return json({ error: "El cuerpo de la petición no es JSON válido." }, 400);
   }
 
-  await ensureBucket();
   const action = String(body.action ?? "");
 
   /* ---------------------------------------------------------- subir */
@@ -190,7 +201,7 @@ export async function handle(req: Request): Promise<Response> {
     const path = `${userId}/${date}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
 
     const r = await fetch(
-      `${SUPABASE_URL}/storage/v1/object/upload/sign/${BUCKET}/${path}`,
+      `${url()}/storage/v1/object/upload/sign/${BUCKET}/${path}`,
       { method: "POST", headers: svc({ "Content-Type": "application/json" }) },
     );
     if (!r.ok) {
@@ -198,7 +209,7 @@ export async function handle(req: Request): Promise<Response> {
       return json({ error: "No se pudo preparar la subida." }, 502);
     }
     const d = await r.json();
-    return json({ path, uploadUrl: `${SUPABASE_URL}/storage/v1${d.url}` });
+    return json({ path, uploadUrl: `${url()}/storage/v1${d.url}` });
   }
 
   /* --------------------------------------------------------- listar */
@@ -220,7 +231,7 @@ export async function handle(req: Request): Promise<Response> {
     if (!path.startsWith(`${userId}/`) || path.includes("..")) {
       return json({ error: "Esa foto no es tuya." }, 403);
     }
-    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
+    const r = await fetch(`${url()}/storage/v1/object/${BUCKET}/${path}`, {
       method: "DELETE",
       headers: svc(),
     });
