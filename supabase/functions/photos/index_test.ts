@@ -156,6 +156,192 @@ Deno.test("opine avisa cuando todavía no hay fotos", async () =>
     assert((await res.json()).error.includes("Todavía no subiste"));
   }));
 
+/* ------------------------------------------- límite semanal de análisis
+   Lo importante es que se decida en el servidor: si se comprobara solo en el
+   navegador, tocando el cliente se gastarían tokens sin tope. */
+function mockConLedger(opts: { entries: { at: string }[]; espia: string[] }) {
+  globalThis.fetch = ((u: unknown, init?: RequestInit) => {
+    const url = String(u);
+    opts.espia.push(`${init?.method ?? "GET"} ${url}`);
+
+    if (url.includes("/auth/v1/user")) {
+      return Promise.resolve(new Response(JSON.stringify({ id: USER }), { status: 200 }));
+    }
+    if (url.includes("generativelanguage") || url.includes("api.groq.com")) {
+      return Promise.resolve(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"recomendacion":"a","consejo":"b"}' }] } }],
+      }), { status: 200 }));
+    }
+    if (url.endsWith("usage.json")) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ entries: opts.entries }), { status: 200 }),
+      );
+    }
+    if (url.includes("/storage/v1/object/sign/")) {
+      return Promise.resolve(new Response(
+        JSON.stringify({ signedURL: "/object/sign/progress/x?token=t" }),
+        { status: 200 },
+      ));
+    }
+    if (url.includes("/storage/v1/object/list/")) {
+      return Promise.resolve(new Response(
+        JSON.stringify([{ name: "2026-09-09-aaaaaaaa.jpg" }]),
+        { status: 200 },
+      ));
+    }
+    if (url.includes("/storage/v1/object/")) {
+      /* la descarga de la foto para mandársela a la IA */
+      return Promise.resolve(new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { "Content-Type": "image/jpeg" },
+      }));
+    }
+    return Promise.resolve(new Response("{}", { status: 200 }));
+  }) as unknown as typeof fetch;
+}
+
+const HOY = new Date().toISOString().slice(0, 10);
+function lunesDeHoy(): string {
+  const d = new Date(HOY + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
+Deno.test("con el cupo agotado no se llama a la IA y se responde 429", async () =>
+  await conEntorno(async () => {
+    Deno.env.set("GEMINI_API_KEY", "x");
+    const espia: string[] = [];
+    mockConLedger({ entries: [{ at: lunesDeHoy() }, { at: HOY }], espia });
+
+    const res = await handle(post({ action: "opine" }));
+    Deno.env.delete("GEMINI_API_KEY");
+
+    assertEquals(res.status, 429);
+    const b = await res.json();
+    assert(b.limited, "marca que fue por el límite");
+    assert(b.error.includes("2 análisis"), `mensaje: ${b.error}`);
+    assert(b.error.includes("lunes"), "dice cuándo vuelven");
+    assertEquals(b.usage.remaining, 0);
+    assert(
+      !espia.some((l) => l.includes("generativelanguage") || l.includes("api.groq.com")),
+      "no se gastó ni un token",
+    );
+  }));
+
+Deno.test("con cupo disponible sí analiza y descuenta", async () =>
+  await conEntorno(async () => {
+    Deno.env.set("GEMINI_API_KEY", "x");
+    const espia: string[] = [];
+    mockConLedger({ entries: [{ at: lunesDeHoy() }], espia });
+
+    const res = await handle(post({ action: "opine" }));
+    Deno.env.delete("GEMINI_API_KEY");
+
+    assertEquals(res.status, 200);
+    const b = await res.json();
+    assertEquals(b.recomendacion, "a");
+    assertEquals(b.usage.used, 2, "el análisis recién hecho ya cuenta");
+    assertEquals(b.usage.remaining, 0);
+    assert(espia.some((l) => l.includes("generativelanguage")), "sí llamó a la IA");
+    assert(
+      espia.some((l) => l.startsWith("POST") && l.endsWith("usage.json")),
+      "guardó el registro",
+    );
+  }));
+
+Deno.test("los análisis de la semana pasada no bloquean", async () =>
+  await conEntorno(async () => {
+    Deno.env.set("GEMINI_API_KEY", "x");
+    const espia: string[] = [];
+    const d = new Date(lunesDeHoy() + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() - 7);
+    const laSemanaPasada = d.toISOString().slice(0, 10);
+    mockConLedger({ entries: [{ at: laSemanaPasada }, { at: laSemanaPasada }], espia });
+
+    const res = await handle(post({ action: "opine" }));
+    Deno.env.delete("GEMINI_API_KEY");
+    assertEquals(res.status, 200, "semana nueva, cupo nuevo");
+  }));
+
+Deno.test("si la IA falla no se descuenta el análisis", async () =>
+  await conEntorno(async () => {
+    Deno.env.set("GEMINI_API_KEY", "x");
+    const espia: string[] = [];
+    mockConLedger({ entries: [], espia });
+    /* Se pisa la respuesta de la IA por una caída. */
+    const conLedger = globalThis.fetch;
+    globalThis.fetch = ((u: unknown, init?: RequestInit) => {
+      if (String(u).includes("generativelanguage") || String(u).includes("api.groq.com")) {
+        return Promise.resolve(new Response("{}", { status: 503 }));
+      }
+      return (conLedger as typeof fetch)(u as string, init);
+    }) as unknown as typeof fetch;
+
+    const res = await handle(post({ action: "opine" }));
+    Deno.env.delete("GEMINI_API_KEY");
+
+    assertEquals(res.status, 502);
+    assertEquals((await res.json()).usage.used, 0, "no se cobra un análisis que no salió");
+    assert(
+      !espia.some((l) => l.startsWith("POST") && l.endsWith("usage.json")),
+      "no se tocó el registro",
+    );
+  }));
+
+Deno.test("usage informa sin analizar nada", async () =>
+  await conEntorno(async () => {
+    const espia: string[] = [];
+    mockConLedger({ entries: [{ at: HOY }], espia });
+    const b = await (await handle(post({ action: "usage" }))).json();
+    assertEquals(b.usage.used, 1);
+    assertEquals(b.usage.remaining, 1);
+    assert(
+      !espia.some((l) => l.includes("generativelanguage") || l.includes("api.groq.com")),
+      "consultar el cupo no cuesta tokens",
+    );
+  }));
+
+Deno.test("list trae fotos, cupo e historial en una sola llamada", async () =>
+  await conEntorno(async () => {
+    const espia: string[] = [];
+    mockConLedger({ entries: [{ at: HOY }], espia });
+    const b = await (await handle(post({ action: "list" }))).json();
+    assert(Array.isArray(b.photos), "trae fotos");
+    assert(b.usage && typeof b.usage.remaining === "number", "trae cupo");
+    assert(Array.isArray(b.history), "trae historial");
+  }));
+
+Deno.test("el registro de uso no se confunde con una foto", async () =>
+  await conEntorno(async () => {
+    const espia: string[] = [];
+    globalThis.fetch = ((u: unknown, init?: RequestInit) => {
+      const url = String(u);
+      if (url.includes("/auth/v1/user")) {
+        return Promise.resolve(new Response(JSON.stringify({ id: USER }), { status: 200 }));
+      }
+      if (url.endsWith("usage.json")) {
+        return Promise.resolve(new Response(JSON.stringify({ entries: [] }), { status: 200 }));
+      }
+      if (url.includes("/storage/v1/object/sign/")) {
+        return Promise.resolve(new Response(
+          JSON.stringify({ signedURL: "/object/sign/progress/x?token=t" }),
+          { status: 200 },
+        ));
+      }
+      if (url.includes("/storage/v1/object/list/")) {
+        return Promise.resolve(new Response(
+          JSON.stringify([{ name: "usage.json" }, { name: "2026-09-09-aaaaaaaa.jpg" }]),
+          { status: 200 },
+        ));
+      }
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    const b = await (await handle(post({ action: "list" }))).json();
+    assertEquals(b.photos.length, 1, "usage.json no aparece como foto");
+    assert(b.photos[0].path.endsWith(".jpg"));
+  }));
+
 Deno.test("el prompt de fotos prohíbe diagnosticar e inventar rutinas", () => {
   const p = buildPhotoPrompt(["2026-09-05", "2026-08-15"]);
   assert(p.includes("2026-09-05") && p.includes("2026-08-15"), "lleva las fechas");

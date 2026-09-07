@@ -13,8 +13,17 @@
    con los modelos que sí aceptan imágenes.
    ========================================================================= */
 import { askAI, CORS, Img, json } from "../_shared/ai.ts";
+import {
+  AnalysisEntry,
+  trimHistory,
+  usageFor,
+} from "../_shared/weeklyLimit.ts";
 
 const BUCKET = "progress";
+/* El registro de análisis de cada usuario, dentro de su propia carpeta: se
+   aísla igual que las fotos y no hace falta una tabla nueva. El nombre no
+   empieza por fecha, así que listar() no lo confunde con una foto. */
+const LEDGER = "usage.json";
 const MAX_BYTES = 6 * 1024 * 1024; // 6 MB por foto
 const SIGNED_TTL = 3600;
 
@@ -23,6 +32,8 @@ const SIGNED_TTL = 3600;
    mensaje claro en vez de con cadenas vacías. */
 const url = () => Deno.env.get("SUPABASE_URL") ?? "";
 const serviceKey = () => Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+const hoy = () => new Date().toISOString().slice(0, 10);
 
 function svc(extra: Record<string, string> = {}) {
   const k = serviceKey();
@@ -69,9 +80,41 @@ async function crearBucket(): Promise<void> {
       name: BUCKET,
       public: false,
       file_size_limit: MAX_BYTES,
-      allowed_mime_types: ["image/jpeg", "image/png", "image/webp"],
+      /* json además de las imágenes, porque el registro de análisis vive en
+         el mismo bucket. */
+      allowed_mime_types: ["image/jpeg", "image/png", "image/webp", "application/json"],
     }),
   }).then((x) => x.body?.cancel());
+}
+
+/* ------------------------------------------------- registro de análisis
+   Un JSON por usuario en su propia carpeta. Se lee y se escribe solo desde
+   acá con la service role: el navegador no lo ve ni lo puede tocar. */
+async function leerLedger(userId: string): Promise<AnalysisEntry[]> {
+  const r = await fetch(`${url()}/storage/v1/object/${BUCKET}/${userId}/${LEDGER}`, {
+    headers: svc(),
+  });
+  if (!r.ok) { await r.text(); return []; }
+  try {
+    const d = await r.json();
+    return Array.isArray(d?.entries) ? d.entries : [];
+  } catch {
+    return [];
+  }
+}
+
+async function guardarLedger(userId: string, entries: AnalysisEntry[]): Promise<void> {
+  const cuerpo = new Blob([JSON.stringify({ entries: trimHistory(entries) })], {
+    type: "application/json",
+  });
+  /* upsert para pisar el anterior en vez de fallar por duplicado. */
+  const r = await fetch(`${url()}/storage/v1/object/${BUCKET}/${userId}/${LEDGER}`, {
+    method: "POST",
+    headers: svc({ "x-upsert": "true", "Content-Type": "application/json" }),
+    body: cuerpo,
+  });
+  if (!r.ok) console.error("ledger", r.status, (await r.text()).slice(0, 200));
+  else await r.text();
 }
 
 interface Foto {
@@ -212,15 +255,22 @@ export async function handle(req: Request): Promise<Response> {
     return json({ path, uploadUrl: `${url()}/storage/v1${d.url}` });
   }
 
-  /* --------------------------------------------------------- listar */
+  /* --------------------------------------------------------- listar
+     Devuelve además cuántos análisis quedan y el historial, para que la
+     pantalla lo muestre sin una segunda llamada. */
   if (action === "list") {
     const fotos = await listar(userId);
     const out = [];
     for (const f of fotos) {
-      const url = await firmar(f.path);
-      if (url) out.push({ path: f.path, date: f.date, url });
+      const signed = await firmar(f.path);
+      if (signed) out.push({ path: f.path, date: f.date, url: signed });
     }
-    return json({ photos: out });
+    const entries = await leerLedger(userId);
+    return json({
+      photos: out,
+      usage: usageFor(entries, hoy()),
+      history: entries.slice(0, 10),
+    });
   }
 
   /* -------------------------------------------------------- borrar
@@ -239,8 +289,28 @@ export async function handle(req: Request): Promise<Response> {
     return json({ ok: r.ok });
   }
 
-  /* --------------------------------------------------- opinión IA */
+  /* -------------------------------------------- uso, sin analizar nada */
+  if (action === "usage") {
+    const entries = await leerLedger(userId);
+    return json({ usage: usageFor(entries, hoy()), history: entries.slice(0, 10) });
+  }
+
+  /* --------------------------------------------------- opinión IA
+     El límite se comprueba ACÁ, no en el navegador: es lo que evita que
+     tocando el cliente se gasten tokens sin tope. La foto ya está guardada
+     pase lo que pase; lo único que se bloquea es el análisis. */
   if (action === "opine") {
+    const entries = await leerLedger(userId);
+    const usage = usageFor(entries, hoy());
+    if (!usage.allowed) {
+      return json({
+        error: `Ya usaste tus ${usage.limit} análisis de esta semana. ` +
+          `Vuelven el lunes ${usage.nextReset}.`,
+        usage,
+        limited: true,
+      }, 429);
+    }
+
     const keys = {
       gemini: Deno.env.get("GEMINI_API_KEY") ?? undefined,
       groq: Deno.env.get("GROQ_API_KEY") ?? undefined,
@@ -250,7 +320,7 @@ export async function handle(req: Request): Promise<Response> {
     }
 
     const fotos = await listar(userId);
-    if (!fotos.length) return json({ error: "Todavía no subiste ninguna foto." }, 400);
+    if (!fotos.length) return json({ error: "Todavía no subiste ninguna foto.", usage }, 400);
 
     /* La más reciente y hasta dos anteriores. */
     const elegidas = fotos.slice(0, 3);
@@ -259,16 +329,30 @@ export async function handle(req: Request): Promise<Response> {
       const im = await descargarB64(f.path);
       if (im) imgs.push({ ...im, label: `Foto del ${f.date}:` });
     }
-    if (!imgs.length) return json({ error: "No se pudieron leer las fotos." }, 502);
+    if (!imgs.length) return json({ error: "No se pudieron leer las fotos.", usage }, 502);
 
     const r = await askAI(buildPhotoPrompt(elegidas.map((f) => f.date)), keys, imgs);
-    if (!r.ok) return json({ error: r.error }, 502);
+    /* Si la IA falló no se descuenta: sería cobrarle un análisis que no
+       llegó a existir. */
+    if (!r.ok) return json({ error: r.error, usage }, 502);
+
+    const entrada: AnalysisEntry = {
+      at: hoy(),
+      photo: elegidas[0].path,
+      recomendacion: r.advice.recomendacion,
+      consejo: r.advice.consejo,
+      provider: r.provider,
+    };
+    const actualizado = trimHistory([entrada, ...entries]);
+    await guardarLedger(userId, actualizado);
 
     return json({
       recomendacion: r.advice.recomendacion,
       consejo: r.advice.consejo,
       provider: r.provider,
       compared: elegidas.map((f) => f.date),
+      usage: usageFor(actualizado, hoy()),
+      history: actualizado.slice(0, 10),
       generatedAt: new Date().toISOString(),
     });
   }

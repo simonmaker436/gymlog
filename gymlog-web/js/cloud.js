@@ -181,7 +181,14 @@
         var ctxRes = r.error.context;
         if (ctxRes && typeof ctxRes.json === 'function') {
           return ctxRes.json()
-            .then(function (b) { throw new Error((b && b.error) || coachError(r.error)); })
+            .then(function (b) {
+              var e = new Error((b && b.error) || coachError(r.error));
+              /* El cuerpo del error trae el uso al día (por ejemplo cuando se
+                 agotó el límite semanal); vale la pena no perderlo. */
+              if (b && b.usage) e.usage = b.usage;
+              if (b && b.limited) e.limited = true;
+              throw e;
+            })
             ['catch'](function (e) {
               throw (e instanceof Error ? e : new Error(coachError(r.error)));
             });
@@ -193,8 +200,16 @@
     });
   }
 
+  /* Devuelve el objeto entero: fotos, uso semanal e historial vienen juntos
+     en una sola llamada. */
   function listPhotos() {
-    return photosCall('list').then(function (d) { return (d && d.photos) || []; });
+    return photosCall('list').then(function (d) {
+      return {
+        photos: (d && d.photos) || [],
+        usage: (d && d.usage) || null,
+        history: (d && d.history) || []
+      };
+    });
   }
 
   /* Se pide una URL firmada de subida y se sube el archivo directo ahí: así

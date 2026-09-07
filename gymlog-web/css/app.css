@@ -773,6 +773,52 @@ main {
 .remind-t small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--text-muted); }
 .card.remind .btn { flex: none; }
 
+/* ------------------------------ cupo semanal de análisis con IA */
+.card.quota { border-left: 2px solid var(--accent); }
+.card.quota.is-out { border-left-color: var(--text-muted); }
+.quota-top { display: flex; align-items: baseline; gap: 8px; }
+.quota-top .eyebrow { flex: 1; }
+.quota-n {
+  font-family: var(--font-cond);
+  font-size: 14px; font-weight: 700; letter-spacing: .06em;
+  color: var(--text-muted);
+}
+.quota-n b { font-size: 19px; color: var(--accent); }
+.card.quota.is-out .quota-n b { color: var(--text-muted); }
+.quota-track {
+  display: block; height: 6px; margin-top: 9px;
+  background: var(--surface-3); border-radius: 3px; overflow: hidden;
+}
+.quota-fill {
+  display: block; height: 100%; border-radius: 3px;
+  background: var(--accent);
+  transition: width .3s cubic-bezier(.2, .8, .3, 1);
+}
+.card.quota.is-out .quota-fill { background: var(--text-muted); }
+.quota-foot {
+  margin: 9px 0 0;
+  font-size: 12.5px; line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* ------------------------------------ historial de lo que dijo la IA */
+.feed { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.feed:last-child { border-bottom: 0; }
+.feed-d {
+  display: block;
+  font-family: var(--font-cond);
+  font-size: 11.5px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 7px;
+}
+.feed p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text-dim); }
+.feed p.feed-c {
+  margin-top: 7px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
 /* --------------------------------------------- fotos de progreso */
 .shots {
   display: grid;

@@ -17,8 +17,7 @@
   /* Pantallas a las que se entra desde otra, no desde la barra de pestañas:
      llevan flecha de volver y su propio título. */
   var SUBVIEWS = {
-    settings: { title: 'Ajustes' },
-    evolution: { title: 'Evolución' }
+    settings: { title: 'Ajustes' }
   };
 
   var state = {
@@ -95,8 +94,6 @@
     state.view = view;
     render();
     window.scrollTo({ top: 0 });
-    // las fotos se piden al entrar, no al abrir la app
-    if (view === 'evolution') loadPhotos(false);
   }
 
   function render(keepFocus) {
@@ -860,7 +857,12 @@
      Las fotos viven en Supabase Storage y solo se acceden por la Edge
      Function, que saca el id de usuario del token. Acá solo se guarda lo que
      hace falta para pintar: la lista con URLs firmadas y el estado. */
-  var photoState = { loading: false, list: null, error: null, opining: false, opinion: null, opinionError: null };
+  var photoState = {
+    loading: false, list: null, error: null,
+    usage: null, history: null,
+    busy: false,                    // subiendo una foto
+    opining: false, opinion: null, opinionError: null
+  };
 
   function loadPhotos(force) {
     if (!cloudUser) return Promise.resolve();
@@ -869,9 +871,11 @@
     photoState.loading = true;
     photoState.error = null;
     render();
-    return GL.cloud.listPhotos().then(function (list) {
+    return GL.cloud.listPhotos().then(function (d) {
       photoState.loading = false;
-      photoState.list = list;
+      photoState.list = d.photos || [];
+      photoState.usage = d.usage || null;
+      photoState.history = d.history || [];
       render();
     })['catch'](function (err) {
       photoState.loading = false;
@@ -913,12 +917,30 @@
     input.addEventListener('change', function () {
       var file = input.files && input.files[0];
       if (!file) return;
+      photoState.busy = true;
+      photoState.opinion = null;
+      photoState.opinionError = null;
+      render();
       U.toast('Subiendo foto…');
+
       shrinkImage(file)
         .then(function (small) { return GL.cloud.uploadPhoto(small, S.today()); })
         .then(function () { return loadPhotos(true); })
-        .then(function () { U.toast('Foto guardada', 'ok'); })
-        ['catch'](function (err) { U.toast(err.message || 'No se pudo subir', 'error'); });
+        .then(function () {
+          photoState.busy = false;
+          U.toast('Foto guardada', 'ok');
+          /* La foto queda guardada pase lo que pase. El análisis solo se
+             pide si al servidor todavía le quedan de esta semana; si no,
+             ni se molesta en llamar. */
+          var u = photoState.usage;
+          if (!u || u.remaining > 0) return opinePhotos();
+          render();
+        })
+        ['catch'](function (err) {
+          photoState.busy = false;
+          render();
+          U.toast(err.message || 'No se pudo subir', 'error');
+        });
     });
     input.click();
   }
@@ -948,13 +970,17 @@
     photoState.opining = true;
     photoState.opinionError = null;
     render();
-    GL.cloud.opinePhotos().then(function (d) {
+    return GL.cloud.opinePhotos().then(function (d) {
       photoState.opining = false;
       photoState.opinion = { recomendacion: d.recomendacion || '', consejo: d.consejo || '' };
+      /* El servidor manda el uso al día: es la única fuente que vale. */
+      if (d.usage) photoState.usage = d.usage;
+      if (d.history) photoState.history = d.history;
       render();
     })['catch'](function (err) {
       photoState.opining = false;
       photoState.opinionError = err.message || 'No se pudo analizar.';
+      if (err.usage) photoState.usage = err.usage;
       render();
     });
   }
@@ -1339,7 +1365,12 @@
 
       case 'filter': state.filter = arg('filter'); render(); break;
       case 'sort': state.sort = state.sort === 'new' ? 'old' : 'new'; render(); break;
-      case 'ptab': state.progressTab = arg('tab'); render(); break;
+      case 'ptab':
+        state.progressTab = arg('tab');
+        render();
+        // las fotos se piden al abrir su pestaña, no al arrancar la app
+        if (state.progressTab === 'coach') loadPhotos(false);
+        break;
       case 'heat-year': {
         var y = parseInt(arg('year'), 10);
         if (y) { state.heatYear = y; render(); }
@@ -1370,7 +1401,6 @@
       case 'photo-add': addPhoto(); break;
       case 'photo-open': openPhoto(arg('path')); break;
       case 'photo-del': deletePhoto(arg('path')); break;
-      case 'photo-opine': opinePhotos(); break;
       case 'share-card': shareCard(); break;
 
       case 'auth-mode': {

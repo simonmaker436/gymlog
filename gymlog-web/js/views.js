@@ -289,13 +289,6 @@
     /* ---- entrenador con IA */
     html += coachCard(ctx);
 
-    /* ---- entrada a Evolución */
-    html += '<button class="card evocard" data-act="go" data-view="evolution">' +
-      '<span class="evocard-ic">' + icon('image') + '</span>' +
-      '<span class="t"><b>Evolución</b>' +
-      '<small>Fotos de progreso y tarjeta para compartir.</small></span>' +
-      icon('right') + '</button>';
-
     /* ---- motivación */
     if (st.current >= 3) {
       html += callout('', 'flame', st.current + ' sesiones seguidas',
@@ -359,22 +352,59 @@
       '</button>';
   }
 
-  /* ============================================================= EVOLUCIÓN
-     Dos cosas: la línea de tiempo de fotos (que viven en Supabase Storage,
-     no acá) y la tarjeta para compartir. El estado de carga lo lleva app.js
-     y llega en ctx.photos. */
-  function evolution(ctx) {
+  /* ====================================================== ENTRENADOR PERSONAL
+     Vive dentro de la pestaña Progreso. Subir una foto dispara el análisis
+     solo: no hay un botón aparte de «pedir opinión». El límite semanal lo
+     manda el servidor y llega en ctx.photos.usage; acá solo se muestra. */
+  function personalCoach(ctx) {
     var p = ctx.photos || {};
+    var u = p.usage;
     var html = '';
 
-    html += sectionTitle('Fotos de progreso');
+    /* --- cuántos análisis quedan */
+    if (u) {
+      var quedan = u.remaining;
+      html += '<div class="card quota' + (quedan ? '' : ' is-out') + '">' +
+        '<div class="quota-top">' +
+        '<span class="eyebrow">Análisis de esta semana</span>' +
+        '<span class="quota-n"><b>' + quedan + '</b> / ' + u.limit + '</span>' +
+        '</div>' +
+        '<span class="quota-track">' +
+        '<span class="quota-fill" style="width:' + Math.round((u.used / u.limit) * 100) + '%"></span>' +
+        '</span>' +
+        '<p class="quota-foot">' + (quedan
+          ? quedan + (quedan === 1 ? ' análisis disponible' : ' análisis disponibles') +
+            '. Se reponen el lunes ' + esc(S.formatShort(u.nextReset)) + '.'
+          : 'Ya usaste tus ' + u.limit + ' análisis de esta semana. Vuelven el lunes ' +
+            esc(S.formatShort(u.nextReset)) + '. Podés seguir guardando fotos igual.') +
+        '</p></div>';
+    }
 
+    /* --- subir */
     html += '<div class="card flush">' +
-      '<button class="row" data-act="photo-add"><div class="t"><b>Sacar o subir una foto</b>' +
-      '<small>Se guarda con la fecha de hoy, solo en tu cuenta.</small></div>' +
+      '<button class="row" data-act="photo-add"' + (p.busy ? ' disabled' : '') + '>' +
+      '<div class="t"><b>' + (p.busy ? 'Subiendo…' : 'Sacar o subir una foto') + '</b>' +
+      '<small>' + (u && !u.remaining
+        ? 'Se guarda en tu historial, sin análisis hasta el lunes.'
+        : 'Se guarda y la IA la analiza al toque.') + '</small></div>' +
       icon('plus') + '</button>' +
       '</div>';
 
+    /* --- el análisis de la última foto */
+    if (p.opining || p.opinion || p.opinionError) {
+      html += '<div class="card coach">' +
+        '<div class="coach-head"><span class="eyebrow">Qué ve la IA</span></div>' +
+        (p.opining
+          ? '<p class="coach-wait">Comparando tus fotos…</p>'
+          : p.opinionError
+            ? '<p class="coach-err">' + esc(p.opinionError) + '</p>'
+            : '<p class="coach-main">' + esc(p.opinion.recomendacion) + '</p>' +
+              (p.opinion.consejo ? '<p class="coach-tip">' + esc(p.opinion.consejo) + '</p>' : '')) +
+        '</div>';
+    }
+
+    /* --- línea de tiempo */
+    html += sectionTitle('Fotos de progreso');
     if (p.loading) {
       html += '<div class="card"><p class="muted" style="margin:0;font-size:13.5px">Cargando tus fotos…</p></div>';
     } else if (p.error) {
@@ -394,28 +424,21 @@
         '<p class="muted" style="margin:12px 0 0;font-size:12.5px">' +
         p.list.length + (p.list.length === 1 ? ' foto' : ' fotos') +
         ' · de la más nueva a la más vieja</p></div>';
-
-      /* La opinión de la IA compara la última con las anteriores, así que con
-         una sola foto no hay nada que comparar. */
-      html += '<div class="card coach">' +
-        '<div class="coach-head">' +
-        '<span class="eyebrow">Qué ve la IA</span><span class="spacer"></span>' +
-        '<button class="btn sm subtle" data-act="photo-opine"' + (p.opining ? ' disabled' : '') + '>' +
-        icon('bolt') + (p.opining ? 'Mirando…' : 'Analizar') + '</button>' +
-        '</div>' +
-        (p.opining
-          ? '<p class="coach-wait">Comparando tus fotos…</p>'
-          : p.opinionError
-            ? '<p class="coach-err">' + esc(p.opinionError) + '</p>'
-            : p.opinion
-              ? '<p class="coach-main">' + esc(p.opinion.recomendacion) + '</p>' +
-              (p.opinion.consejo ? '<p class="coach-tip">' + esc(p.opinion.consejo) + '</p>' : '')
-              : '<p class="coach-wait">' + (p.list.length === 1
-                ? 'Con una sola foto no hay comparación posible todavía. Igual podés pedirle que la mire.'
-                : 'Compara tu última foto con las anteriores.') + '</p>') +
-        '</div>';
     }
 
+    /* --- historial de lo que dijo la IA otras veces */
+    if (p.history && p.history.length) {
+      html += sectionTitle('Análisis anteriores');
+      html += '<div class="card flush">' + p.history.map(function (h) {
+        return '<div class="feed">' +
+          '<span class="feed-d">' + esc(S.capitalize(S.formatLong(h.at))) + '</span>' +
+          '<p>' + esc(h.recomendacion || '') + '</p>' +
+          (h.consejo ? '<p class="feed-c">' + esc(h.consejo) + '</p>' : '') +
+          '</div>';
+      }).join('') + '</div>';
+    }
+
+    /* --- tarjeta para compartir */
     html += sectionTitle('Tarjeta para compartir');
     html += '<div class="card">' +
       '<p class="muted" style="margin:0 0 14px;font-size:13.5px">' +
@@ -424,7 +447,7 @@
       '<button class="btn primary" data-act="share-card">' + icon('image') + 'Generar</button>' +
       '</div></div>';
 
-    return { html: html };
+    return html;
   }
 
   /* ============================================================ CALENDARIO */
@@ -621,6 +644,7 @@
     { id: 'analisis', label: 'Análisis' },
     { id: 'graficos', label: 'Gráficos' },
     { id: 'cuerpo', label: 'Cuerpo' },
+    { id: 'coach', label: 'Entrenador' },
     { id: 'logros', label: 'Logros' }
   ];
 
@@ -640,6 +664,7 @@
       html += p.html + mm.html;
       mount = function () { if (p.mount) p.mount(); if (mm.mount) mm.mount(); };
     }
+    else if (tab === 'coach') html += personalCoach(ctx);
     else html += achievementsSection(ctx);
 
     return { html: html, mount: mount };
@@ -1240,7 +1265,6 @@
 
   GL.views = {
     home: home, calendar: calendar, history: history, progress: progress, settings: settings,
-    evolution: evolution,
     entryCard: entryCard, fmtWeight: fmtWeight, fmtCm: fmtCm, fmtAvg: fmtAvg, fmtPct: fmtPct, dec: dec,
     statusPill: statusPill, tile: tile, weekDots: weekDots, sectionTitle: sectionTitle,
     goalRing: goalRing, typeValue: typeValue, NONE: NONE
