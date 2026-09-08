@@ -352,58 +352,43 @@
       '</button>';
   }
 
-  /* ====================================================== ENTRENADOR PERSONAL
-     Vive dentro de la pestaña Progreso. Subir una foto dispara el análisis
-     solo: no hay un botón aparte de «pedir opinión». El límite semanal lo
-     manda el servidor y llega en ctx.photos.usage; acá solo se muestra. */
-  function personalCoach(ctx) {
+  /* =========================================================== FOTOS
+     Viven en la pestaña Progreso: son un registro más de cómo va el cuerpo.
+     Subir una foto dispara el análisis solo, sin botón aparte; lo que la IA
+     conteste se lee en la pestaña Entrenador. */
+  function photosSection(ctx) {
     var p = ctx.photos || {};
     var u = p.usage;
+    var sinCupo = u && !u.remaining;
     var html = '';
 
-    /* --- cuántos análisis quedan */
-    if (u) {
-      var quedan = u.remaining;
-      html += '<div class="card quota' + (quedan ? '' : ' is-out') + '">' +
-        '<div class="quota-top">' +
-        '<span class="eyebrow">Análisis de esta semana</span>' +
-        '<span class="quota-n"><b>' + quedan + '</b> / ' + u.limit + '</span>' +
-        '</div>' +
-        '<span class="quota-track">' +
-        '<span class="quota-fill" style="width:' + Math.round((u.used / u.limit) * 100) + '%"></span>' +
-        '</span>' +
-        '<p class="quota-foot">' + (quedan
-          ? quedan + (quedan === 1 ? ' análisis disponible' : ' análisis disponibles') +
-            '. Se reponen el lunes ' + esc(S.formatShort(u.nextReset)) + '.'
-          : 'Ya usaste tus ' + u.limit + ' análisis de esta semana. Vuelven el lunes ' +
-            esc(S.formatShort(u.nextReset)) + '. Podés seguir guardando fotos igual.') +
-        '</p></div>';
-    }
-
-    /* --- subir */
     html += '<div class="card flush">' +
-      '<button class="row" data-act="photo-add"' + (p.busy ? ' disabled' : '') + '>' +
+      '<button class="row" data-act="photo-add"' + (p.busy || p.opining ? ' disabled' : '') + '>' +
       '<div class="t"><b>' + (p.busy ? 'Subiendo…' : 'Sacar o subir una foto') + '</b>' +
-      '<small>' + (u && !u.remaining
-        ? 'Se guarda en tu historial, sin análisis hasta el lunes.'
-        : 'Se guarda y la IA la analiza al toque.') + '</small></div>' +
+      '<small>' + (sinCupo
+        ? 'Se guarda en tu historial. El análisis vuelve el lunes.'
+        : 'Se guarda y el entrenador la analiza al toque.') + '</small></div>' +
       icon('plus') + '</button>' +
       '</div>';
 
-    /* --- el análisis de la última foto */
-    if (p.opining || p.opinion || p.opinionError) {
-      html += '<div class="card coach">' +
-        '<div class="coach-head"><span class="eyebrow">Qué ve la IA</span></div>' +
-        (p.opining
-          ? '<p class="coach-wait">Comparando tus fotos…</p>'
-          : p.opinionError
-            ? '<p class="coach-err">' + esc(p.opinionError) + '</p>'
-            : '<p class="coach-main">' + esc(p.opinion.recomendacion) + '</p>' +
-              (p.opinion.consejo ? '<p class="coach-tip">' + esc(p.opinion.consejo) + '</p>' : '')) +
-        '</div>';
+    /* Un aviso corto, no la tarjeta entera: el detalle está en Entrenador. */
+    if (p.opining) {
+      html += '<div class="card tight"><p class="coach-wait" style="margin:0">' +
+        'El entrenador está mirando la foto…</p></div>';
+    } else if (p.opinion || p.opinionError) {
+      html += '<button class="card tight linkrow" data-act="go" data-view="coach">' +
+        '<span>' + (p.opinionError
+          ? 'El análisis no salió. Mirá el detalle en Entrenador.'
+          : 'Listo: el entrenador ya opinó de tu última foto.') + '</span>' +
+        icon('right') + '</button>';
+    } else if (u) {
+      html += '<button class="card tight linkrow" data-act="go" data-view="coach">' +
+        '<span>' + (sinCupo
+          ? 'Sin análisis esta semana. Vuelven el lunes ' + esc(S.formatShort(u.nextReset)) + '.'
+          : u.remaining + ' de ' + u.limit + ' análisis disponibles esta semana.') + '</span>' +
+        icon('right') + '</button>';
     }
 
-    /* --- línea de tiempo */
     html += sectionTitle('Fotos de progreso');
     if (p.loading) {
       html += '<div class="card"><p class="muted" style="margin:0;font-size:13.5px">Cargando tus fotos…</p></div>';
@@ -426,7 +411,130 @@
         ' · de la más nueva a la más vieja</p></div>';
     }
 
-    /* --- historial de lo que dijo la IA otras veces */
+    html += sectionTitle('Tarjeta para compartir');
+    html += '<div class="card">' +
+      '<p class="muted" style="margin:0 0 14px;font-size:13.5px">' +
+      'Una imagen con tu racha, tus totales y tus marcas, lista para guardar.</p>' +
+      '<div class="btn-row">' +
+      '<button class="btn primary" data-act="share-card">' + icon('image') + 'Generar</button>' +
+      '</div></div>';
+
+    return html;
+  }
+
+  /* ============================================== ENTRENADOR PERSONAL
+     Pestaña propia, al mismo nivel que Inicio o Progreso. Acá vive TODO lo
+     que dice la IA: el consejo del día, la charla y lo que opinó de las
+     fotos. El límite semanal lo manda el servidor y llega en
+     ctx.photos.usage; acá solo se muestra. */
+
+  /* Cuántos análisis quedan esta semana. */
+  function quotaCard(u) {
+    if (!u) return '';
+    var quedan = u.remaining;
+    return '<div class="card quota' + (quedan ? '' : ' is-out') + '">' +
+      '<div class="quota-top">' +
+      '<span class="eyebrow">Análisis de esta semana</span>' +
+      '<span class="quota-n"><b>' + quedan + '</b> / ' + u.limit + '</span>' +
+      '</div>' +
+      '<span class="quota-track">' +
+      '<span class="quota-fill" style="width:' + Math.round((u.used / u.limit) * 100) + '%"></span>' +
+      '</span>' +
+      '<p class="quota-foot">' + (quedan
+        ? quedan + (quedan === 1 ? ' análisis disponible' : ' análisis disponibles') +
+          '. Se reponen el lunes ' + esc(S.formatShort(u.nextReset)) + '.'
+        : 'Ya usaste tus ' + u.limit + ' análisis de esta semana. Vuelven el lunes ' +
+          esc(S.formatShort(u.nextReset)) + '. Podés seguir guardando fotos igual.') +
+      '</p></div>';
+  }
+
+  /* --------------------------------------------------------------- chat
+     Bloque aparte del análisis de fotos, aunque compartan pantalla y la
+     misma cadena Gemini → Groq por detrás. El historial vive en los ajustes
+     de la cuenta, así que la charla sigue donde se dejó. */
+  var CHAT_IDEAS = [
+    '¿Cómo voy con mi constancia?',
+    '¿Cuántos días de descanso necesito?',
+    '¿Qué hago si me falta motivación?',
+    '¿Está bien entrenar dos días seguidos?'
+  ];
+
+  function chatPanel(ctx) {
+    var c = ctx.chat || {};
+    var msgs = c.messages || [];
+
+    var log = '';
+    if (!msgs.length) {
+      log = '<div class="chat-empty">' +
+        '<p>Preguntale lo que quieras sobre entrenar: rutinas, descanso, técnica, ' +
+        'o cómo venís con tu constancia.</p>' +
+        '<div class="chat-ideas">' + CHAT_IDEAS.map(function (q) {
+          return '<button class="chip" data-act="chat-ask" data-q="' + esc(q) + '">' + esc(q) + '</button>';
+        }).join('') + '</div></div>';
+    } else {
+      log = msgs.map(function (m) {
+        return '<div class="bubble ' + (m.role === 'user' ? 'mine' : 'his') + '">' +
+          esc(m.text) + '</div>';
+      }).join('');
+      if (c.pending) log += '<div class="bubble his typing"><i></i><i></i><i></i></div>';
+    }
+
+    return '<div class="card chat">' +
+      '<div class="chat-log" id="chat-log">' + log + '</div>' +
+      (c.error ? '<p class="coach-err chat-error">' + esc(c.error) + '</p>' : '') +
+      '<form class="chat-bar" id="chat-form" autocomplete="off">' +
+      '<input id="chat-input" type="text" placeholder="Escribí tu pregunta…" ' +
+      'maxlength="800"' + (c.pending ? ' disabled' : '') + '>' +
+      '<button class="chat-send" type="submit" aria-label="Enviar"' +
+      (c.pending ? ' disabled' : '') + '>' + icon('send') + '</button>' +
+      '</form>' +
+      (msgs.length
+        ? '<div class="chat-foot"><button class="btn sm subtle" data-act="chat-clear">' +
+          icon('trash') + 'Borrar la charla</button></div>'
+        : '') +
+      '</div>';
+  }
+
+  function coachScreen(ctx) {
+    var p = ctx.photos || {};
+    var html = '';
+
+    /* Sin sesión no hay nada que pedirle a la IA. */
+    if (!ctx.cloud) {
+      return {
+        html: '<div class="card"><div class="empty" style="padding:30px 12px">' + icon('spark') +
+          '<h3>Entrá a tu cuenta</h3><p>El entrenador necesita tu sesión para responderte.</p>' +
+          '</div></div>'
+      };
+    }
+
+    var diario = coachCard(ctx);
+    if (diario) html += sectionTitle('Consejo de hoy') + diario;
+
+    html += sectionTitle('Preguntale al entrenador');
+    html += chatPanel(ctx);
+
+    html += sectionTitle('Tus fotos, según la IA');
+    html += quotaCard(p.usage);
+
+    if (p.opining || p.opinion || p.opinionError) {
+      html += '<div class="card coach">' +
+        '<div class="coach-head"><span class="eyebrow">Última foto</span></div>' +
+        (p.opining
+          ? '<p class="coach-wait">Comparando tus fotos…</p>'
+          : p.opinionError
+            ? '<p class="coach-err">' + esc(p.opinionError) + '</p>'
+            : '<p class="coach-main">' + esc(p.opinion.recomendacion) + '</p>' +
+              (p.opinion.consejo ? '<p class="coach-tip">' + esc(p.opinion.consejo) + '</p>' : '')) +
+        '</div>';
+    } else if (!p.history || !p.history.length) {
+      html += '<button class="card tight linkrow" data-act="go" data-view="progress">' +
+        '<span>' + (p.list && p.list.length
+          ? 'Subí una foto nueva y la analizo al toque.'
+          : 'Todavía no subiste ninguna foto. Se suben desde Progreso.') + '</span>' +
+        icon('right') + '</button>';
+    }
+
     if (p.history && p.history.length) {
       html += sectionTitle('Análisis anteriores');
       html += '<div class="card flush">' + p.history.map(function (h) {
@@ -438,16 +546,14 @@
       }).join('') + '</div>';
     }
 
-    /* --- tarjeta para compartir */
-    html += sectionTitle('Tarjeta para compartir');
-    html += '<div class="card">' +
-      '<p class="muted" style="margin:0 0 14px;font-size:13.5px">' +
-      'Una imagen con tu racha, tus totales y tus marcas, lista para guardar.</p>' +
-      '<div class="btn-row">' +
-      '<button class="btn primary" data-act="share-card">' + icon('image') + 'Generar</button>' +
-      '</div></div>';
+    /* El registro de la charla se pinta entero en cada render, así que hay
+       que volver a bajarlo: si no, un mensaje nuevo queda fuera de vista. */
+    function mount() {
+      var log = document.getElementById('chat-log');
+      if (log) log.scrollTop = log.scrollHeight;
+    }
 
-    return html;
+    return { html: html, mount: mount };
   }
 
   /* ============================================================ CALENDARIO */
@@ -644,7 +750,7 @@
     { id: 'analisis', label: 'Análisis' },
     { id: 'graficos', label: 'Gráficos' },
     { id: 'cuerpo', label: 'Cuerpo' },
-    { id: 'coach', label: 'Entrenador' },
+    { id: 'fotos', label: 'Fotos' },
     { id: 'logros', label: 'Logros' }
   ];
 
@@ -664,7 +770,7 @@
       html += p.html + mm.html;
       mount = function () { if (p.mount) p.mount(); if (mm.mount) mm.mount(); };
     }
-    else if (tab === 'coach') html += personalCoach(ctx);
+    else if (tab === 'fotos') html += photosSection(ctx);
     else html += achievementsSection(ctx);
 
     return { html: html, mount: mount };
@@ -1264,7 +1370,8 @@
   }
 
   GL.views = {
-    home: home, calendar: calendar, history: history, progress: progress, settings: settings,
+    home: home, calendar: calendar, history: history, progress: progress,
+    coach: coachScreen, settings: settings,
     entryCard: entryCard, fmtWeight: fmtWeight, fmtCm: fmtCm, fmtAvg: fmtAvg, fmtPct: fmtPct, dec: dec,
     statusPill: statusPill, tile: tile, weekDots: weekDots, sectionTitle: sectionTitle,
     goalRing: goalRing, typeValue: typeValue, NONE: NONE

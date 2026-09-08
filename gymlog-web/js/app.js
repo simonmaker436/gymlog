@@ -11,7 +11,8 @@
     { id: 'home', label: 'Inicio', icon: 'home', title: 'Inicio' },
     { id: 'calendar', label: 'Calendario', icon: 'calendar', title: 'Calendario' },
     { id: 'progress', label: 'Progreso', icon: 'progress', title: 'Progreso' },
-    { id: 'history', label: 'Historial', icon: 'history', title: 'Historial' }
+    { id: 'history', label: 'Historial', icon: 'history', title: 'Historial' },
+    { id: 'coach', label: 'Entrenador', icon: 'spark', title: 'Entrenador' }
   ];
 
   /* Pantallas a las que se entra desde otra, no desde la barra de pestañas:
@@ -59,6 +60,11 @@
       cloud: cloudUser,
       hour: new Date().getHours(),
       photos: photoState,
+      chat: {
+        messages: settings.chat || [],
+        pending: chatState.pending,
+        error: chatState.error
+      },
       coach: settings.coach,
       coachState: coachState,
       coachMin: COACH_MIN_WORKOUTS,
@@ -94,6 +100,9 @@
     state.view = view;
     render();
     window.scrollTo({ top: 0 });
+    /* El entrenador muestra el cupo semanal y lo que opinó de las fotos: se
+       piden al entrar, no al arrancar la app. */
+    if (view === 'coach') loadPhotos(false);
   }
 
   function render(keepFocus) {
@@ -119,7 +128,9 @@
       el.classList.toggle('is-active', el.getAttribute('data-tab-id') === state.view);
     });
 
-    document.getElementById('fab').classList.toggle('hidden', state.view === 'home' || state.view === 'settings');
+    /* El entrenador tampoco lleva botón flotante: taparía la caja de escribir. */
+    document.getElementById('fab').classList.toggle('hidden',
+      state.view === 'home' || state.view === 'settings' || state.view === 'coach');
 
     if (out.mount) out.mount();
 
@@ -985,6 +996,122 @@
     });
   }
 
+  /* --------------------------------------------------------------- chat
+     La charla se guarda en los ajustes, que ya viajan a la cuenta en cada
+     sincronización: sigue donde se dejó al abrir en otro dispositivo, y como
+     cada cuenta tiene su propia fila, nadie ve la conversación de nadie.
+     Acá solo queda en RAM lo que no vale la pena guardar: si hay una
+     respuesta en camino y el último error. */
+  var chatState = { pending: false, error: null };
+
+  /* Lo que la app sabe de la persona y le sirve al entrenador para responder
+     con algo más que generalidades. Son datos que ya están en pantalla: no
+     se manda nada que el usuario no vea. */
+  function chatProfile() {
+    var st = store.settings();
+    var ws = store.workouts();
+    var hechos = S.done(ws);
+    var g = st.gymDays;
+    var mes = S.monthSummary(ws, g, S.monthKey(S.today()), S.today(), st.startDate, st.backfillDays);
+    var rachas = S.streaks(ws, g, S.today(), st.startDate, st.backfillDays);
+
+    /* Los tipos de entreno más frecuentes de las últimas 30 sesiones. */
+    var cuenta = {};
+    hechos.slice(0, 30).forEach(function (w) {
+      var l = store.workoutTypeLabel(w.type);
+      if (l) cuenta[l] = (cuenta[l] || 0) + 1;
+    });
+    var tipos = Object.keys(cuenta)
+      .sort(function (a, b) { return cuenta[b] - cuenta[a]; })
+      .slice(0, 3);
+
+    var conDuracion = hechos.filter(function (w) { return w.duration > 0; });
+    var prom = conDuracion.length
+      ? conDuracion.reduce(function (a, w) { return a + w.duration; }, 0) / conDuracion.length
+      : null;
+
+    /* El peso se guarda en la unidad que la persona eligió; la IA lo recibe
+       siempre en kg para no tener que adivinar. */
+    var pesos = store.weights();
+    var ultimo = pesos.length ? pesos[pesos.length - 1].value : st.startWeight;
+    var pesoKg = ultimo == null ? null
+      : Math.round(st.units === 'lb' ? ultimo * 0.45359237 : ultimo);
+
+    var meta = store.BODY_GOALS.find(function (b) { return b.key === st.bodyGoal; });
+
+    return {
+      nombre: st.name || null,
+      edad: st.age || null,
+      alturaCm: st.heightCm || null,
+      pesoKg: pesoKg,
+      objetivo: meta ? meta.label.toLowerCase() : null,
+      diasPorSemana: st.gymDays.length || null,
+      sesionesTotales: hechos.length,
+      esteMes: mes.count,
+      rachaSemanas: rachas.current || null,
+      minutosPromedio: prom,
+      tiposFrecuentes: tipos,
+      ultimaSesion: hechos.length ? hechos[0].date : null
+    };
+  }
+
+  /* Lo que se manda a la función: solo role y text. La hora es para pintar,
+     no le sirve a la IA. */
+  function chatPayload(msgs) {
+    return msgs.map(function (m) { return { role: m.role, text: m.text }; });
+  }
+
+  function saveChat(msgs) {
+    var cap = store.CHAT_MAX || 40;
+    return store.saveSettings({ chat: msgs.slice(-cap) });
+  }
+
+  function sendChat(text) {
+    text = (text || '').trim();
+    if (!text || chatState.pending) return;
+    if (!cloudUser) { U.toast('Iniciá sesión para hablar con el entrenador', 'error'); return; }
+
+    var msgs = (store.settings().chat || []).concat([
+      { role: 'user', text: text.slice(0, 800), at: new Date().toISOString() }
+    ]);
+
+    chatState.pending = true;
+    chatState.error = null;
+
+    /* Se pinta la pregunta antes de tener respuesta: si no, el mensaje
+       parece perdido durante los segundos que tarda la IA. */
+    saveChat(msgs).then(function () { render(); });
+
+    GL.cloud.chat(chatPayload(msgs), chatProfile())
+      .then(function (d) {
+        chatState.pending = false;
+        return saveChat(msgs.concat([
+          { role: 'assistant', text: d.reply, at: new Date().toISOString() }
+        ]));
+      })
+      .then(function () { render(); })
+      ['catch'](function (err) {
+        chatState.pending = false;
+        chatState.error = (err && err.message) || 'No se pudo responder ahora mismo.';
+        render();
+      });
+  }
+
+  function clearChat() {
+    U.confirmDialog({
+      title: 'Borrar la charla',
+      message: 'Se borra toda la conversación con el entrenador. Tus fotos y sus análisis no se tocan.',
+      confirmLabel: 'Borrar', danger: true
+    }).then(function (ok) {
+      if (!ok) return;
+      chatState.error = null;
+      store.saveSettings({ chat: null }).then(function () {
+        render();
+        U.toast('Charla borrada', 'ok');
+      });
+    });
+  }
+
   function cloudSync() {
     if (!cloudUser) return;
     U.toast('Sincronizando…');
@@ -1369,7 +1496,7 @@
         state.progressTab = arg('tab');
         render();
         // las fotos se piden al abrir su pestaña, no al arrancar la app
-        if (state.progressTab === 'coach') loadPhotos(false);
+        if (state.progressTab === 'fotos') loadPhotos(false);
         break;
       case 'heat-year': {
         var y = parseInt(arg('year'), 10);
@@ -1402,6 +1529,9 @@
       case 'photo-open': openPhoto(arg('path')); break;
       case 'photo-del': deletePhoto(arg('path')); break;
       case 'share-card': shareCard(); break;
+
+      case 'chat-ask': sendChat(arg('q')); break;
+      case 'chat-clear': clearChat(); break;
 
       case 'auth-mode': {
         // conserva lo ya escrito al cambiar entre crear cuenta e iniciar sesión
@@ -1575,6 +1705,19 @@
      hay sesión. */
   function wireGlobalEvents() {
     document.addEventListener('click', onClick);
+
+    /* El chat se manda con Enter o con el botón. Va por delegación como todo
+       lo demás: el formulario se vuelve a crear en cada repintado. */
+    document.addEventListener('submit', function (e) {
+      var form = e.target.closest && e.target.closest('#chat-form');
+      if (!form) return;
+      e.preventDefault();
+      var input = document.getElementById('chat-input');
+      if (!input) return;
+      var text = input.value;
+      input.value = '';
+      sendChat(text);
+    });
 
     /* buscador del historial: se escribe y se vuelve a pintar sin perder el foco */
     var qTimer = null;

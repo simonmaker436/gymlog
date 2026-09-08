@@ -37,6 +37,9 @@
     search: '<path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z"/><path d="M16.2 16.2 21 21"/>',
     replay: '<path d="M20.5 12A8.5 8.5 0 1 1 18 6"/><path d="M20.5 2.5v5h-5"/>',
     image: '<path d="M3 5h18v14H3z"/><path d="M3 15.5 8.5 10l4 4 3-3 5.5 5.5"/>',
+    /* el entrenador: una chispa, para no repetir la pesa del logo */
+    spark: '<path d="M12 2.5 14.2 9 20.5 11 14.2 13 12 19.5 9.8 13 3.5 11 9.8 9z"/><path d="M18.5 3v3.4M17 4.7h3"/>',
+    send: '<path d="M4 12 20.5 4 13 20.5 11.4 13.6z"/><path d="M11.4 13.6 4 12"/>',
     filter: '<path d="M3 5h18l-7 8v6l-4 2v-8L3 5z"/>',
 
     /* significado */

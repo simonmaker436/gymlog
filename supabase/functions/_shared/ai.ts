@@ -295,6 +295,144 @@ export async function askAI(
   };
 }
 
+/* =========================================================================
+   CONVERSACIÓN
+   =========================================================================
+   El coach de fotos devuelve dos campos fijos; el chat, en cambio, es una
+   charla: varios turnos y respuesta en texto corriente. Mismo par de
+   proveedores y mismo orden (Gemini → Groq), pero sin responseSchema, que
+   acá solo estorbaría.
+   ========================================================================= */
+
+export interface ChatMsg {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export type ChatResult =
+  | { ok: true; text: string }
+  | { ok: false; error: string };
+
+/* Gemini llama "model" a lo que OpenAI llama "assistant", y las
+   instrucciones de sistema van en su propio campo. */
+export async function chatGemini(
+  system: string,
+  msgs: ChatMsg[],
+  apiKey: string,
+): Promise<ChatResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${geminiUrl(GEMINI_MODEL)}?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: msgs.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.text }],
+        })),
+        generationConfig: {
+          temperature: 0.8,
+          /* Holgado a propósito: el modelo razona antes de escribir y ese
+             razonamiento sale del MISMO presupuesto que la respuesta. */
+          maxOutputTokens: 4096,
+        },
+      }),
+    });
+  } catch {
+    return { ok: false, error: "No se pudo contactar con la IA. Probá más tarde." };
+  }
+
+  const raw = await res.text();
+  if (!res.ok) {
+    console.error("gemini chat", res.status, raw.slice(0, 400));
+    return { ok: false, error: friendlyGeminiError(res.status, raw) };
+  }
+
+  let text = "";
+  try {
+    text = extractText(JSON.parse(raw));
+  } catch { /* queda vacío */ }
+
+  if (!text) {
+    console.error("gemini chat vacío", res.status, raw.slice(0, 600));
+    return { ok: false, error: "La IA no devolvió respuesta." };
+  }
+  return { ok: true, text };
+}
+
+export async function chatGroq(
+  system: string,
+  msgs: ChatMsg[],
+  apiKey: string,
+): Promise<ChatResult> {
+  let res: Response;
+  try {
+    res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        temperature: 0.8,
+        max_tokens: 900,
+        /* Sin response_format: acá la respuesta es texto, no un objeto. Y sin
+           él tampoco aplica la regla de Groq de exigir la palabra «json». */
+        messages: [
+          { role: "system", content: system },
+          ...msgs.map((m) => ({ role: m.role, content: m.text })),
+        ],
+      }),
+    });
+  } catch {
+    return { ok: false, error: "No se pudo contactar con el respaldo." };
+  }
+
+  const raw = await res.text();
+  if (!res.ok) {
+    console.error("groq chat", res.status, raw.slice(0, 400));
+    return { ok: false, error: friendlyGroqError(res.status, raw) };
+  }
+
+  let text = "";
+  try {
+    const c = JSON.parse(raw)?.choices?.[0]?.message?.content;
+    if (typeof c === "string") text = c.trim();
+  } catch { /* queda vacío */ }
+
+  if (!text) {
+    console.error("groq chat vacío", res.status, raw.slice(0, 600));
+    return { ok: false, error: "El respaldo no devolvió respuesta." };
+  }
+  return { ok: true, text };
+}
+
+export type ChatChainResult =
+  | { ok: true; text: string; provider: "gemini" | "groq" }
+  | { ok: false; error: string };
+
+export async function chatAI(
+  system: string,
+  msgs: ChatMsg[],
+  keys: AiKeys,
+): Promise<ChatChainResult> {
+  const fallos: string[] = [];
+
+  if (keys.gemini) {
+    const r = await chatGemini(system, msgs, keys.gemini);
+    if (r.ok) return { ok: true, text: r.text, provider: "gemini" };
+    fallos.push(r.error);
+  }
+  if (keys.groq) {
+    const r = await chatGroq(system, msgs, keys.groq);
+    if (r.ok) return { ok: true, text: r.text, provider: "groq" };
+    fallos.push(r.error);
+  }
+  return { ok: false, error: fallos.join(" ") || "No se pudo responder ahora mismo." };
+}
+
 /* CORS y respuestas JSON, que las usan todas las funciones. */
 export const CORS = {
   "Access-Control-Allow-Origin": "*",

@@ -167,6 +167,34 @@
       });
   }
 
+  /* ------------------------------------------------------------- chat
+     Igual que el coach: la clave de la IA vive en la función, no acá, y
+     supabase-js adjunta solo el token de la sesión. El historial lo manda el
+     cliente desde sus propios ajustes; el servidor no guarda la charla de
+     nadie, así que no hay forma de leer la de otra cuenta. */
+  function chat(messages, profile) {
+    var c = sb();
+    if (!c) return Promise.reject(new Error('No hay conexión con la nube ahora mismo.'));
+    return c.functions.invoke('chat', { body: { messages: messages, profile: profile || null } })
+      .then(function (r) {
+        if (r.error) {
+          var ctxRes = r.error.context;
+          if (ctxRes && typeof ctxRes.json === 'function') {
+            return ctxRes.json()
+              .then(function (b) { throw new Error((b && b.error) || coachError(r.error)); })
+              ['catch'](function (e) {
+                throw (e instanceof Error ? e : new Error(coachError(r.error)));
+              });
+          }
+          throw new Error(coachError(r.error));
+        }
+        if (!r.data || !r.data.reply) {
+          throw new Error((r.data && r.data.error) || 'La IA no devolvió respuesta.');
+        }
+        return r.data;
+      });
+  }
+
   /* ------------------------------------------------------------- fotos
      Todo pasa por la Edge Function «photos»: el navegador nunca toca el
      bucket directamente ni conoce su nombre. El id de usuario lo saca la
@@ -251,6 +279,7 @@
     push: push,
     pull: pull,
     coach: coach,
+    chat: chat,
     listPhotos: listPhotos,
     uploadPhoto: uploadPhoto,
     deletePhoto: deletePhoto,

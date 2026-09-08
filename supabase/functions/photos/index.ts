@@ -13,6 +13,7 @@
    con los modelos que sí aceptan imágenes.
    ========================================================================= */
 import { askAI, CORS, Img, json } from "../_shared/ai.ts";
+import { serviceKey, supabaseUrl as url, svc, userIdFrom } from "../_shared/auth.ts";
 import {
   AnalysisEntry,
   trimHistory,
@@ -27,36 +28,7 @@ const LEDGER = "usage.json";
 const MAX_BYTES = 6 * 1024 * 1024; // 6 MB por foto
 const SIGNED_TTL = 3600;
 
-/* Se leen al usarlas, no al cargar el módulo: así las pruebas pueden
-   prepararlas antes de llamar, y un despliegue sin variables falla con un
-   mensaje claro en vez de con cadenas vacías. */
-const url = () => Deno.env.get("SUPABASE_URL") ?? "";
-const serviceKey = () => Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-
 const hoy = () => new Date().toISOString().slice(0, 10);
-
-function svc(extra: Record<string, string> = {}) {
-  const k = serviceKey();
-  return { "Authorization": `Bearer ${k}`, "apikey": k, ...extra };
-}
-
-/* ------------------------------------------------------- quién llama
-   Se valida el token contra el propio Supabase; no se decodifica a mano ni
-   se confía en nada del cuerpo de la petición. */
-async function userIdFrom(req: Request): Promise<string | null> {
-  const auth = req.headers.get("Authorization") ?? "";
-  if (!auth.toLowerCase().startsWith("bearer ")) return null;
-  try {
-    const r = await fetch(`${url()}/auth/v1/user`, {
-      headers: { "Authorization": auth, "apikey": serviceKey() },
-    });
-    if (!r.ok) return null;
-    const u = await r.json();
-    return typeof u?.id === "string" ? u.id : null;
-  } catch {
-    return null;
-  }
-}
 
 /* El bucket se crea solo la primera vez. Privado y sin políticas: nadie que
    no sea esta función (con la service role) puede leerlo ni listarlo.

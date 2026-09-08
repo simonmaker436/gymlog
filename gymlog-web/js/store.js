@@ -182,8 +182,20 @@
        así viaja a la cuenta y el mismo consejo aparece en todos los
        dispositivos sin volver a llamar a la API.
        { date: 'YYYY-MM-DD', recomendacion, consejo } */
-    coach: null
+    coach: null,
+
+    /* La conversación con el entrenador. Vive en settings a propósito: así
+       viaja a la cuenta con el resto del respaldo (tabla `backups`, con RLS
+       por auth.uid()) y la charla sigue en el otro dispositivo, sin montar
+       ningún almacén compartido donde pudiera cruzarse con la de nadie.
+       [{ role: 'user' | 'assistant', text, at }] */
+    chat: null
   };
+
+  /* Cuántos mensajes se guardan. El respaldo entero viaja en cada
+     sincronización: una charla infinita lo engordaría sin sentido. */
+  var CHAT_MAX = 40;
+  var CHAT_MAX_CHARS = 2000;
 
   /* Una sola etiqueta por sesión. Nada de listas de ejercicios ni series:
      esto es un cuaderno de constancia, no de rutinas. */
@@ -275,6 +287,26 @@
         recomendacion: (co.recomendacion || '').toString().slice(0, 600),
         consejo: (co.consejo || '').toString().slice(0, 600)
       } : null;
+    }
+
+    /* La charla llega del respaldo, que puede venir de una versión vieja o
+       de un archivo importado a mano: se acepta solo lo que tiene forma de
+       mensaje. */
+    if (out.chat != null) {
+      out.chat = Array.isArray(out.chat)
+        ? out.chat.filter(function (m) {
+          return m && typeof m === 'object' &&
+            (m.role === 'user' || m.role === 'assistant') &&
+            typeof m.text === 'string' && m.text.trim();
+        }).map(function (m) {
+          return {
+            role: m.role,
+            text: m.text.toString().slice(0, CHAT_MAX_CHARS),
+            at: typeof m.at === 'string' ? m.at : null
+          };
+        }).slice(-CHAT_MAX)
+        : null;
+      if (out.chat && !out.chat.length) out.chat = null;
     }
 
     /* null a propósito: significa «los que tenga programados», así la meta
@@ -741,6 +773,7 @@
 
     uid: uid,
     weeklyTarget: weeklyTarget,
+    CHAT_MAX: CHAT_MAX,
     workoutTypeLabel: workoutTypeLabel,
     DEFAULT_SETTINGS: DEFAULT_SETTINGS,
     WORKOUT_TYPES: WORKOUT_TYPES,
