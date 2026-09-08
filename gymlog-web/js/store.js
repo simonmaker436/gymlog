@@ -197,27 +197,160 @@
   var CHAT_MAX = 40;
   var CHAT_MAX_CHARS = 2000;
 
-  /* Una sola etiqueta por sesión. Nada de listas de ejercicios ni series:
-     esto es un cuaderno de constancia, no de rutinas. */
-  var WORKOUT_TYPES = [
-    { key: 'pierna', label: 'Pierna' },
-    { key: 'empuje', label: 'Empuje' },
-    { key: 'tiron', label: 'Tirón' },
-    { key: 'fullbody', label: 'Full body' },
-    { key: 'cardio', label: 'Cardio' },
-    { key: 'otro', label: 'Otro' }
+  /* ===================================================== QUÉ SE TRABAJÓ
+     ESTA es la lista que hay que tocar para cambiar categorías o músculos:
+     el formulario, el calendario, el historial y el contexto que recibe la
+     IA salen todos de acá. El orden es el que se ve en pantalla.
+
+     Sigue sin haber ejercicios, series ni pesos: esto marca zonas, no
+     rutinas. */
+  var MUSCLE_GROUPS = [
+    {
+      key: 'pierna', label: 'Pierna', muscles: [
+        { key: 'cuadriceps', label: 'Cuádriceps' },
+        { key: 'isquiotibiales', label: 'Isquiotibiales' },
+        { key: 'gluteos', label: 'Glúteos' },
+        { key: 'pantorrillas', label: 'Pantorrillas' }
+      ]
+    },
+    {
+      key: 'brazo', label: 'Brazo', muscles: [
+        { key: 'biceps', label: 'Bíceps' },
+        { key: 'triceps', label: 'Tríceps' },
+        { key: 'antebrazo', label: 'Antebrazo' }
+      ]
+    },
+    {
+      key: 'abdomen', label: 'Abdomen', muscles: [
+        { key: 'abdominales', label: 'Abdominales' },
+        { key: 'oblicuos', label: 'Oblicuos' }
+      ]
+    },
+    {
+      key: 'pecho', label: 'Pecho', muscles: [
+        { key: 'pectoral-superior', label: 'Pectoral superior' },
+        { key: 'pectoral-medio', label: 'Pectoral medio' },
+        { key: 'pectoral-inferior', label: 'Pectoral inferior' }
+      ]
+    },
+    {
+      key: 'espalda', label: 'Espalda', muscles: [
+        { key: 'dorsales', label: 'Dorsales' },
+        { key: 'trapecio', label: 'Trapecio' },
+        { key: 'romboides', label: 'Romboides' },
+        { key: 'lumbares', label: 'Lumbares' }
+      ]
+    },
+    /* «Otro» no despliega músculos: lleva un campo de texto libre. */
+    { key: 'otro', label: 'Otro', muscles: [], free: true }
   ];
 
+  var MAX_OTHER_CHARS = 60;
+
+  /* Las etiquetas viejas, de cuando cada sesión llevaba UNA sola. No se
+     convierten a la estructura nueva: traducir «Empuje» a un conjunto de
+     músculos sería inventar datos que la persona nunca marcó. Se guardan
+     tal cual y se siguen mostrando, y en cuanto se edite esa sesión con el
+     formulario nuevo pasa a tener `focus`. */
+  var LEGACY_TYPES = {
+    pierna: 'Pierna', empuje: 'Empuje', tiron: 'Tirón',
+    fullbody: 'Full body', cardio: 'Cardio', otro: 'Otro'
+  };
+
+  function groupDef(key) {
+    return MUSCLE_GROUPS.find(function (g) { return g.key === key; }) || null;
+  }
+  function groupLabel(key) {
+    var g = groupDef(key);
+    return g ? g.label : null;
+  }
+  function muscleOwner(key) {
+    return MUSCLE_GROUPS.find(function (g) {
+      return g.muscles.some(function (m) { return m.key === key; });
+    }) || null;
+  }
+  function muscleLabel(key) {
+    var g = muscleOwner(key);
+    if (!g) return null;
+    var m = g.muscles.find(function (x) { return x.key === key; });
+    return m ? m.label : null;
+  }
+
+  /* Ordena según MUSCLE_GROUPS, no según el orden en que se fue tocando:
+     así la misma selección siempre se lee igual. */
+  function groupOrder(key) {
+    var i = MUSCLE_GROUPS.findIndex(function (g) { return g.key === key; });
+    return i < 0 ? 99 : i;
+  }
+  function muscleOrder(key) {
+    var g = muscleOwner(key);
+    if (!g) return [99, 99];
+    return [groupOrder(g.key), g.muscles.findIndex(function (m) { return m.key === key; })];
+  }
+
+  /* { groups: [...], muscles: [...], other: '…' } o null.
+     Un músculo solo vale si su categoría está marcada, y el texto libre solo
+     si «Otro» lo está: así no quedan restos de algo que se desmarcó. */
+  function normalizeFocus(v) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+
+    var groups = [];
+    (Array.isArray(v.groups) ? v.groups : []).forEach(function (k) {
+      if (typeof k === 'string' && groupDef(k) && groups.indexOf(k) < 0) groups.push(k);
+    });
+    if (!groups.length) return null;
+
+    var muscles = [];
+    (Array.isArray(v.muscles) ? v.muscles : []).forEach(function (k) {
+      if (typeof k !== 'string' || muscles.indexOf(k) >= 0) return;
+      var owner = muscleOwner(k);
+      if (owner && groups.indexOf(owner.key) >= 0) muscles.push(k);
+    });
+
+    var other = typeof v.other === 'string' ? v.other.trim().slice(0, MAX_OTHER_CHARS) : '';
+    if (groups.indexOf('otro') < 0) other = '';
+
+    groups.sort(function (a, b) { return groupOrder(a) - groupOrder(b); });
+    muscles.sort(function (a, b) {
+      var x = muscleOrder(a), y = muscleOrder(b);
+      return x[0] - y[0] || x[1] - y[1];
+    });
+
+    var out = { groups: groups, muscles: muscles };
+    if (other) out.other = other;
+    return out;
+  }
+
+  /* Etiqueta corta para la píldora del historial y el calendario. Prefiere la
+     selección nueva y cae a la etiqueta vieja si la sesión es de antes. */
+  function focusLabel(w) {
+    if (!w) return null;
+    var f = w.focus;
+    if (f && f.groups && f.groups.length) {
+      return f.groups.map(function (k) {
+        return (k === 'otro' && f.other) ? f.other : groupLabel(k);
+      }).filter(Boolean).join(' · ');
+    }
+    return (w.type && LEGACY_TYPES[w.type]) || null;
+  }
+
+  /* Los músculos marcados, en texto. Vacío si no se detalló ninguno. */
+  function focusMuscles(w) {
+    if (!w || !w.focus || !w.focus.muscles) return [];
+    return w.focus.muscles.map(muscleLabel).filter(Boolean);
+  }
+
+  /* Compatibilidad: quedaba código llamando a esto con la clave suelta. */
   function workoutTypeLabel(key) {
-    var t = WORKOUT_TYPES.find(function (x) { return x.key === key; });
-    return t ? t.label : null;
+    return LEGACY_TYPES[key] || null;
   }
 
   /* Opcional a propósito: null es un valor válido y significa «sin etiqueta».
      Cualquier cosa que no esté en la lista se descarta. */
+  /* Solo para lo que ya estaba guardado; el formulario nuevo no lo escribe. */
   function normalizeType(v) {
     if (v === '' || v === null || v === undefined) return null;
-    return WORKOUT_TYPES.some(function (t) { return t.key === v; }) ? v : null;
+    return LEGACY_TYPES[v] ? v : null;
   }
 
   var BODY_GOALS = [
@@ -491,6 +624,7 @@
         difficulty: data.went ? clamp15(data.difficulty) : null,
         // sin ir al gimnasio no hay tipo de entreno que valga
         type: data.went ? normalizeType(data.type) : null,
+        focus: data.went ? normalizeFocus(data.focus) : null,
         weight: (data.weight === '' || data.weight === null || data.weight === undefined || isNaN(Number(data.weight)))
           ? null : Number(data.weight),
         notes: (data.notes || '').trim(),
@@ -703,9 +837,11 @@
             energy: w.energy == null ? null : clamp15(w.energy),
             feeling: w.feeling == null ? null : clamp15(w.feeling),
             difficulty: w.difficulty == null ? null : clamp15(w.difficulty),
-            /* Las copias hechas antes de que existiera el tipo no lo traen:
-               quedan en null, que es un valor válido. */
+            /* Las copias hechas antes de que existiera esto no lo traen:
+               quedan en null, que es un valor válido. `type` es la etiqueta
+               vieja de una sola opción; `focus`, la selección por músculos. */
             type: normalizeType(w.type),
+            focus: normalizeFocus(w.focus),
             weight: (w.weight == null || isNaN(Number(w.weight))) ? null : Number(w.weight),
             notes: (w.notes || '').toString(),
             demo: !!w.demo,
@@ -775,8 +911,14 @@
     weeklyTarget: weeklyTarget,
     CHAT_MAX: CHAT_MAX,
     workoutTypeLabel: workoutTypeLabel,
+    focusLabel: focusLabel,
+    focusMuscles: focusMuscles,
+    normalizeFocus: normalizeFocus,
+    groupLabel: groupLabel,
+    muscleLabel: muscleLabel,
+    MUSCLE_GROUPS: MUSCLE_GROUPS,
+    MAX_OTHER_CHARS: MAX_OTHER_CHARS,
     DEFAULT_SETTINGS: DEFAULT_SETTINGS,
-    WORKOUT_TYPES: WORKOUT_TYPES,
     BODY_GOALS: BODY_GOALS
   };
 

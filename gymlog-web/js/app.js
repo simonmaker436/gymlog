@@ -105,12 +105,59 @@
     if (view === 'coach') loadPhotos(false);
   }
 
+  /* ------------------------------------------------- lo que no se pisa
+     render() rehace #main entero, así que sin esto un repintado en segundo
+     plano borraría un mensaje a medio escribir y devolvería el scroll de
+     cualquier caja al principio. Se anota antes y se devuelve después.
+
+     Solo se miran los elementos con id: son los únicos que se puede
+     reconocer con seguridad al otro lado del innerHTML. */
+  function anotarLoVivo(main) {
+    var vivo = { campo: null, scrolls: [] };
+
+    var act = document.activeElement;
+    if (act && act.id && main.contains(act) &&
+      (act.tagName === 'INPUT' || act.tagName === 'TEXTAREA')) {
+      vivo.campo = { id: act.id, value: act.value };
+      try {
+        vivo.campo.start = act.selectionStart;
+        vivo.campo.end = act.selectionEnd;
+      } catch (e) { /* type=date y compañía no tienen selección */ }
+    }
+
+    Array.prototype.forEach.call(main.querySelectorAll('[id]'), function (el) {
+      if (el.scrollTop > 0) vivo.scrolls.push({ id: el.id, top: el.scrollTop });
+    });
+    return vivo;
+  }
+
+  function devolverLoVivo(vivo) {
+    vivo.scrolls.forEach(function (x) {
+      var el = document.getElementById(x.id);
+      /* data-pinned lo pone quien acaba de decidir a dónde mirar (por
+         ejemplo el chat al llegar un mensaje nuevo): eso manda. */
+      if (el && !el.hasAttribute('data-pinned')) el.scrollTop = x.top;
+    });
+
+    var c = vivo.campo;
+    if (!c) return;
+    var el = document.getElementById(c.id);
+    if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) return;
+    if (el.value !== c.value) el.value = c.value;
+    el.focus();
+    if (c.start != null) {
+      try { el.setSelectionRange(c.start, c.end); } catch (e) { }
+    }
+  }
+
   function render(keepFocus) {
     /* Estando en la pantalla de acceso no hay shell que pintar. Una subida en
        segundo plano puede terminar justo después de cerrar sesión y llamar
        aquí: sin esta guarda, revienta. */
     var main = document.getElementById('main');
     if (!main) return;
+
+    var vivo = anotarLoVivo(main);
 
     var c = ctx();
     var def = VIEWS.find(function (v) { return v.id === state.view; });
@@ -133,6 +180,9 @@
       state.view === 'home' || state.view === 'settings' || state.view === 'coach');
 
     if (out.mount) out.mount();
+
+    /* Después de mount(), que es quien puede haber fijado un data-pinned. */
+    devolverLoVivo(vivo);
 
     if (keepFocus) {
       var el = document.getElementById(keepFocus);
@@ -169,12 +219,27 @@
 
   var QUICK = [45, 60, 75, 90];
 
+  /* ------------------------------------------------ músculos trabajados
+     La lista de categorías y músculos vive en store.MUSCLE_GROUPS; acá solo
+     está el manejo del formulario. Se trabaja con la forma completa
+     ({groups, muscles, other}) y el almacén la normaliza al guardar. */
+  function emptyFocus() { return { groups: [], muscles: [], other: '' }; }
+
+  function focusFrom(w) {
+    var f = w && w.focus;
+    return {
+      groups: (f && f.groups ? f.groups.slice() : []),
+      muscles: (f && f.muscles ? f.muscles.slice() : []),
+      other: (f && f.other) || ''
+    };
+  }
+
   function blank(c) {
     var t = S.typicalWorkout(c.workouts);
     return {
       id: null, date: c.today, went: true, duration: t.duration,
       energy: t.energy, feeling: t.feeling, difficulty: t.difficulty,
-      type: null, weight: null, notes: ''
+      type: null, focus: emptyFocus(), weight: null, notes: ''
     };
   }
 
@@ -186,6 +251,7 @@
       duration: existing.duration || 60,
       energy: existing.energy || 4, feeling: existing.feeling || 4, difficulty: existing.difficulty || 3,
       type: existing.type || null,
+      focus: focusFrom(existing),
       weight: existing.weight, notes: existing.notes || ''
     } : Object.assign(blank(c), { date: date || c.today });
 
@@ -193,6 +259,39 @@
        uno más antiguo, se sigue pudiendo editar. */
     var minDate = S.addDays(c.today, -c.win);
     if (existing && S.daysBetween(existing.date, minDate) > 0) minDate = existing.date;
+
+    function groupButtons() {
+      return GL.store.MUSCLE_GROUPS.map(function (g) {
+        return '<button type="button" data-group="' + g.key + '"' +
+          (f.focus.groups.indexOf(g.key) >= 0 ? ' class="is-active"' : '') +
+          '>' + esc(g.label) + '</button>';
+      }).join('');
+    }
+
+    /* Un panel por categoría marcada, en el orden de la constante. «Otro» no
+       tiene músculos: lleva un campo libre. */
+    function focusPanels() {
+      return GL.store.MUSCLE_GROUPS.filter(function (g) {
+        return f.focus.groups.indexOf(g.key) >= 0;
+      }).map(function (g) {
+        if (g.free) {
+          return '<div class="focus-panel"><label class="focus-head" for="f-other">' +
+            esc(g.label) + '</label>' +
+            '<input class="input" type="text" id="f-other" maxlength="' + GL.store.MAX_OTHER_CHARS +
+            '" placeholder="¿Qué trabajaste?" value="' + esc(f.focus.other) + '"></div>';
+        }
+        var todos = g.muscles.every(function (m) { return f.focus.muscles.indexOf(m.key) >= 0; });
+        return '<div class="focus-panel">' +
+          '<div class="focus-head"><b>' + esc(g.label) + '</b>' +
+          '<button type="button" class="focus-all" data-all="' + g.key + '">' +
+          (todos ? 'Quitar todos' : 'Seleccionar todos') + '</button></div>' +
+          '<div class="focus-muscles">' + g.muscles.map(function (m) {
+            return '<button type="button" data-muscle="' + m.key + '"' +
+              (f.focus.muscles.indexOf(m.key) >= 0 ? ' class="is-active"' : '') +
+              '>' + esc(m.label) + '</button>';
+          }).join('') + '</div></div>';
+      }).join('');
+    }
 
     function body() {
       var hours = Math.floor(f.duration / 60), mins = f.duration % 60;
@@ -233,12 +332,15 @@
         '<div class="field"><label>¿Cómo me sentí? <span class="rating-out">' + f.feeling + '/5</span></label>' + ratingRow('feeling', f.feeling) + '</div>' +
         '<div class="field"><label>Dificultad <span class="rating-out">' + f.difficulty + '/5</span></label>' + ratingRow('difficulty', f.difficulty) + '</div>' +
 
-        '<div class="field"><label>Tipo de entreno <span class="hint">opcional</span></label>' +
-        '<div class="optiongrid" id="f-type">' +
-        GL.store.WORKOUT_TYPES.map(function (t) {
-          return '<button type="button" data-type="' + t.key + '"' +
-            (f.type === t.key ? ' class="is-active"' : '') + '>' + esc(t.label) + '</button>';
-        }).join('') + '</div></div>' +
+        '<div class="field"><label>Qué trabajaste <span class="hint">opcional · varias</span></label>' +
+        (f.type && !f.focus.groups.length
+          ? '<span class="hint" style="margin:0 0 8px">Antes lo anotaste como «' +
+            esc(GL.store.workoutTypeLabel(f.type)) + '». Se conserva hasta que marques algo acá.</span>'
+          : '') +
+        '<div id="f-focus">' +
+        '<div class="optiongrid" id="f-groups">' + groupButtons() + '</div>' +
+        '<div id="f-panels">' + focusPanels() + '</div>' +
+        '</div></div>' +
 
         '<div class="field"><label for="f-w">Peso corporal <span class="hint">opcional</span></label>' +
         '<span style="position:relative;display:block">' +
@@ -278,9 +380,10 @@
               id: w.id, date: date, went: w.went, duration: w.duration || 60,
               energy: w.energy || 4, feeling: w.feeling || 4, difficulty: w.difficulty || 3,
               type: w.type || null,
+              focus: focusFrom(w),
               weight: w.weight, notes: w.notes || ''
             };
-          } else { f.id = null; f.date = date; }
+          } else { f.id = null; f.date = date; f.type = null; f.focus = emptyFocus(); }
           $('.sheet-body').innerHTML = body();
           bind(); refreshExists();
         }
@@ -329,16 +432,72 @@
             });
           });
 
-          /* Tipo de entreno: es opcional, así que volver a tocar el que ya
-             está elegido lo quita. */
-          $('#f-type').addEventListener('click', function (e) {
-            var b = e.target.closest('[data-type]');
-            if (!b) return;
-            var key = b.getAttribute('data-type');
-            f.type = (f.type === key) ? null : key;
-            Array.prototype.forEach.call(this.children, function (x) {
-              x.classList.toggle('is-active', x.getAttribute('data-type') === f.type);
+          /* Qué se trabajó. Todo es opcional y todo se puede desmarcar
+             volviéndolo a tocar. Los paneles se rehacen solo cuando cambia
+             una CATEGORÍA: si se rehicieran también al marcar un músculo, el
+             campo de texto de «Otro» perdería el foco a media palabra. */
+          function repintarPaneles() {
+            $('#f-panels').innerHTML = focusPanels();
+          }
+          function marcarGrupos() {
+            Array.prototype.forEach.call($('#f-groups').children, function (x) {
+              x.classList.toggle('is-active',
+                f.focus.groups.indexOf(x.getAttribute('data-group')) >= 0);
             });
+          }
+
+          $('#f-focus').addEventListener('click', function (e) {
+            var g = e.target.closest('[data-group]');
+            if (g) {
+              var key = g.getAttribute('data-group');
+              var i = f.focus.groups.indexOf(key);
+              if (i >= 0) {
+                f.focus.groups.splice(i, 1);
+                /* Al quitar la categoría se van sus músculos: dejarlos
+                   sueltos guardaría algo que ya no se ve. */
+                var def = GL.store.MUSCLE_GROUPS.find(function (x) { return x.key === key; });
+                f.focus.muscles = f.focus.muscles.filter(function (m) {
+                  return !def.muscles.some(function (x) { return x.key === m; });
+                });
+                if (key === 'otro') f.focus.other = '';
+              } else {
+                f.focus.groups.push(key);
+              }
+              marcarGrupos();
+              repintarPaneles();
+              return;
+            }
+
+            var all = e.target.closest('[data-all]');
+            if (all) {
+              var gk = all.getAttribute('data-all');
+              var gd = GL.store.MUSCLE_GROUPS.find(function (x) { return x.key === gk; });
+              var claves = gd.muscles.map(function (m) { return m.key; });
+              var todos = claves.every(function (k) { return f.focus.muscles.indexOf(k) >= 0; });
+              f.focus.muscles = f.focus.muscles.filter(function (k) { return claves.indexOf(k) < 0; });
+              if (!todos) f.focus.muscles = f.focus.muscles.concat(claves);
+              repintarPaneles();
+              return;
+            }
+
+            var m = e.target.closest('[data-muscle]');
+            if (m) {
+              var mk = m.getAttribute('data-muscle');
+              var j = f.focus.muscles.indexOf(mk);
+              if (j >= 0) f.focus.muscles.splice(j, 1); else f.focus.muscles.push(mk);
+              m.classList.toggle('is-active', j < 0);
+              /* Solo cambia el texto del botón «todos», no el panel entero. */
+              var cab = m.closest('.focus-panel').querySelector('[data-all]');
+              if (cab) {
+                var gd2 = GL.store.MUSCLE_GROUPS.find(function (x) { return x.key === cab.getAttribute('data-all'); });
+                cab.textContent = gd2.muscles.every(function (x) { return f.focus.muscles.indexOf(x.key) >= 0; })
+                  ? 'Quitar todos' : 'Seleccionar todos';
+              }
+            }
+          });
+
+          $('#f-focus').addEventListener('input', function (e) {
+            if (e.target.id === 'f-other') f.focus.other = e.target.value;
           });
 
           ['#f-h', '#f-m'].forEach(function (sel) { $(sel).addEventListener('input', readDuration); });
@@ -355,7 +514,10 @@
           save({
             id: f.id, date: $('#f-date').value || f.date, went: f.went,
             duration: f.duration, energy: f.energy, feeling: f.feeling, difficulty: f.difficulty,
+            /* `type` viaja sin tocarse: es la etiqueta vieja de una sola
+               opción y se conserva mientras no se marque nada nuevo. */
             type: f.type,
+            focus: f.focus,
             weight: f.went && $('#f-w') ? $('#f-w').value : null,
             notes: $('#f-n').value
           });
@@ -418,8 +580,11 @@
           '<div class="tiles three">' +
           V.tile('Dificultad', w.difficulty + '<small>/5</small>') +
           V.tile('Peso', w.weight != null ? V.fmtWeight(w.weight, c.settings.units) : V.NONE) +
-          V.tile('Tipo', V.typeValue(w.type)) +
-          '</div>'
+          V.tile('Trabajado', V.typeValue(w)) +
+          '</div>' +
+          (GL.store.focusMuscles(w).length
+            ? '<p class="musclist">' + esc(GL.store.focusMuscles(w).join(' · ')) + '</p>'
+            : '')
           : '') +
         (w.notes
           ? '<div><span class="eyebrow">Notas</span>' +
@@ -446,7 +611,8 @@
           store.saveWorkout({
             id: null, date: copy.date, went: copy.went, duration: copy.duration,
             energy: copy.energy, feeling: copy.feeling, difficulty: copy.difficulty,
-            type: copy.type, weight: copy.weight, notes: copy.notes, demo: copy.demo
+            type: copy.type, focus: copy.focus,
+            weight: copy.weight, notes: copy.notes, demo: copy.demo
           }).then(function () { render(); U.toast('Recuperada', 'ok'); });
         }
       });
@@ -780,13 +946,28 @@
     clearTimeout(syncTimer);
     syncTimer = setTimeout(function () {
       pushSilently().then(function () {
-        /* Una subida en segundo plano no cambia nada de lo que se ve, salvo la
-           hora de «última sincronización» de Ajustes. Repintar la pantalla
-           entera en cada ciclo reproducía la animación de entrada y parecía
-           que la app se recargaba sola. */
-        if (state.view === 'settings') render();
+        /* Lo único que cambia al subir es la hora de «última sincronización»
+           de Ajustes, y para eso NO hace falta rehacer la pantalla: se
+           reescribe esa frase y nada más.
+
+           Repintar entero acá reproducía la animación de entrada y parecía
+           que la app se recargaba sola; además dejaba abierta la puerta a
+           que un ciclo en segundo plano se llevara por delante lo que la
+           persona estuviera escribiendo. */
+        actualizarHoraDeSync();
       });
     }, 1500);
+  }
+
+  /* Reescribe solo la frase de «última sincronización», si está a la vista. */
+  function actualizarHoraDeSync() {
+    var el = document.getElementById('sync-age');
+    if (!el) return;
+    var last = store.settings().lastSync;
+    if (!last) return;
+    var dias = Math.max(0, Math.floor((Date.now() - new Date(last).getTime()) / 86400000));
+    el.textContent = ' Última sincronización hace ' +
+      (dias === 0 ? 'menos de un día' : dias + ' días') + '.';
   }
 
   /* Envuelve los métodos que cambian datos para subirlos solos a la nube,
@@ -829,7 +1010,11 @@
   function coachPayload() {
     return S.done(store.workouts()).slice(0, 30).map(function (w) {
       return {
-        date: w.date, type: w.type || null,
+        date: w.date,
+        /* `type` es la etiqueta vieja; `focus`, la selección por músculos.
+           Se mandan las dos y la función usa la que haya. */
+        type: w.type || null,
+        focus: w.focus || null,
         energy: w.energy, feeling: w.feeling, difficulty: w.difficulty,
         duration: w.duration, notes: w.notes || ''
       };
@@ -1015,15 +1200,22 @@
     var mes = S.monthSummary(ws, g, S.monthKey(S.today()), S.today(), st.startDate, st.backfillDays);
     var rachas = S.streaks(ws, g, S.today(), st.startDate, st.backfillDays);
 
-    /* Los tipos de entreno más frecuentes de las últimas 30 sesiones. */
-    var cuenta = {};
-    hechos.slice(0, 30).forEach(function (w) {
-      var l = store.workoutTypeLabel(w.type);
-      if (l) cuenta[l] = (cuenta[l] || 0) + 1;
-    });
-    var tipos = Object.keys(cuenta)
-      .sort(function (a, b) { return cuenta[b] - cuenta[a]; })
-      .slice(0, 3);
+    /* Lo más trabajado en las últimas 30 sesiones: primero las zonas, y
+       aparte los músculos concretos, que es lo que ahora se marca. */
+    function masFrecuentes(saca, tope) {
+      var cuenta = {};
+      hechos.slice(0, 30).forEach(function (w) {
+        saca(w).forEach(function (l) { if (l) cuenta[l] = (cuenta[l] || 0) + 1; });
+      });
+      return Object.keys(cuenta)
+        .sort(function (a, b) { return cuenta[b] - cuenta[a]; })
+        .slice(0, tope);
+    }
+    var zonas = masFrecuentes(function (w) {
+      var l = store.focusLabel(w);
+      return l ? l.split(' · ') : [];
+    }, 4);
+    var musculos = masFrecuentes(store.focusMuscles, 5);
 
     var conDuracion = hechos.filter(function (w) { return w.duration > 0; });
     var prom = conDuracion.length
@@ -1050,7 +1242,8 @@
       esteMes: mes.count,
       rachaSemanas: rachas.current || null,
       minutosPromedio: prom,
-      tiposFrecuentes: tipos,
+      tiposFrecuentes: zonas,
+      musculosFrecuentes: musculos,
       ultimaSesion: hechos.length ? hechos[0].date : null
     };
   }

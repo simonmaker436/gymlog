@@ -24,8 +24,37 @@ Deno.test("cleanWorkouts descarta basura y respeta el tope", () => {
   assertEquals(out.length, 2);
   assertEquals(out[0].date, "2026-09-04");
   assertEquals(out[0].notes, "duro");
-  assertEquals(out[1].type, null, "un tipo que no existe queda en null");
+  assertEquals(out[1].groups, [], "una etiqueta que no existe no deja zona");
   assertEquals(out[1].energy, null, "energía fuera de 1-5 queda en null");
+});
+
+/* La selección nueva: varias zonas y sus músculos en una misma sesión. */
+Deno.test("cleanWorkouts entiende la selección por músculos", () => {
+  const out = cleanWorkouts([{
+    date: "2026-09-04",
+    focus: {
+      groups: ["pierna", "brazo", "inventada"],
+      muscles: ["cuadriceps", "biceps", "inventado"],
+    },
+  }]);
+  assertEquals(out[0].groups, ["pierna", "brazo"], "descarta la zona inventada");
+  assertEquals(out[0].muscles, ["cuadriceps", "biceps"], "descarta el músculo inventado");
+});
+
+Deno.test("la etiqueta vieja solo se usa si no hay selección nueva", () => {
+  const conAmbas = cleanWorkouts([
+    { date: "2026-09-04", type: "empuje", focus: { groups: ["pecho"], muscles: [] } },
+  ]);
+  assertEquals(conAmbas[0].groups, ["pecho"], "gana la nueva, no se cuenta dos veces");
+
+  const soloVieja = cleanWorkouts([{ date: "2026-09-04", type: "empuje" }]);
+  assertEquals(soloVieja[0].groups, ["empuje"], "una sesión de antes conserva su etiqueta");
+});
+
+Deno.test("sin zona marcada no se guardan músculos sueltos", () => {
+  const out = cleanWorkouts([{ date: "2026-09-04", focus: { muscles: ["biceps"] } }]);
+  assertEquals(out[0].groups, []);
+  assertEquals(out[0].muscles, []);
 });
 
 Deno.test("cleanWorkouts ordena de más nueva a más vieja", () => {
@@ -44,22 +73,44 @@ Deno.test("cleanWorkouts corta en 30", () => {
   assertEquals(cleanWorkouts(raw).length, 30);
 });
 
-Deno.test("summarize cuenta los días desde cada tipo", () => {
+Deno.test("summarize cuenta los días desde cada zona", () => {
   const ws = cleanWorkouts([
-    { date: "2026-09-05", type: "empuje", energy: 4 },
-    { date: "2026-09-03", type: "empuje", energy: 3 },
-    { date: "2026-08-10", type: "pierna", energy: 2 },
+    { date: "2026-09-05", focus: { groups: ["pecho"] }, energy: 4 },
+    { date: "2026-09-03", focus: { groups: ["pecho"] }, energy: 3 },
+    { date: "2026-08-10", focus: { groups: ["pierna"] }, energy: 2 },
   ]);
   const s = summarize(ws, HOY);
-  const porTipo = Object.fromEntries(s.types.map((t) => [t.key, t]));
+  const porZona = Object.fromEntries(s.types.map((t) => [t.key, t]));
 
-  assertEquals(porTipo.empuje.count, 2);
-  assertEquals(porTipo.empuje.daysSince, 1, "empuje fue ayer");
-  assertEquals(porTipo.pierna.count, 1);
-  assertEquals(porTipo.pierna.daysSince, 27, "pierna hace 27 días");
-  assertEquals(porTipo.cardio.count, 0);
-  assertEquals(porTipo.cardio.daysSince, null, "cardio nunca");
+  assertEquals(porZona.pecho.count, 2);
+  assertEquals(porZona.pecho.daysSince, 1, "pecho fue ayer");
+  assertEquals(porZona.pierna.count, 1);
+  assertEquals(porZona.pierna.daysSince, 27, "pierna hace 27 días");
+  assertEquals(porZona.espalda.count, 0);
+  assertEquals(porZona.espalda.daysSince, null, "espalda nunca");
   assertEquals(s.avgEnergy, 3);
+});
+
+Deno.test("una sesión con varias zonas cuenta en todas", () => {
+  const ws = cleanWorkouts([
+    { date: "2026-09-05", focus: { groups: ["pecho", "brazo"], muscles: ["triceps"] } },
+  ]);
+  const s = summarize(ws, HOY);
+  const porZona = Object.fromEntries(s.types.map((t) => [t.key, t]));
+  assertEquals(porZona.pecho.count, 1);
+  assertEquals(porZona.brazo.count, 1);
+  assertEquals(s.untyped, 0);
+  assertEquals(s.muscles, [{ label: "Tríceps", count: 1 }]);
+});
+
+/* Las etiquetas retiradas no deben aparecer como «0 sesiones» para siempre;
+   solo se listan si la persona realmente las usó alguna vez. */
+Deno.test("las etiquetas viejas solo salen si están en el historial", () => {
+  const sinNada = summarize(cleanWorkouts([{ date: "2026-09-05" }]), HOY);
+  assertEquals(sinNada.types.some((t) => t.key === "empuje"), false);
+
+  const conVieja = summarize(cleanWorkouts([{ date: "2026-09-05", type: "empuje" }]), HOY);
+  assertEquals(conVieja.types.find((t) => t.key === "empuje")?.count, 1);
 });
 
 Deno.test("summarize sobrevive sin datos de energía ni tipos", () => {
@@ -71,17 +122,26 @@ Deno.test("summarize sobrevive sin datos de energía ni tipos", () => {
 
 Deno.test("buildPrompt trae los hechos y prohíbe inventar ejercicios", () => {
   const ws = cleanWorkouts([
-    { date: "2026-09-05", type: "empuje", energy: 4, notes: "buena sesión" },
-    { date: "2026-08-10", type: "pierna", energy: 2 },
+    { date: "2026-09-05", focus: { groups: ["pecho"], muscles: ["pectoral-medio"] }, energy: 4, notes: "buena sesión" },
+    { date: "2026-08-10", focus: { groups: ["pierna"] }, energy: 2 },
   ]);
   const p = buildPrompt(summarize(ws, HOY));
 
   assert(p.includes("Pierna: 1 sesión, última hace 27 días"), "días reales de pierna");
-  assert(p.includes("Empuje: 1 sesión, última hace 1 día"), "singular de día");
+  assert(p.includes("Pecho: 1 sesión, última hace 1 día"), "singular de día");
+  assert(p.includes("Pectoral medio (1)"), "los músculos concretos entran");
   assert(p.includes("series"), "advierte que no hay series");
   assert(p.includes("buena sesión"), "incluye las notas");
-  assert(p.includes("Sin registrar nunca:"), "lista los tipos no usados");
-  assert(p.indexOf("Pierna") < p.indexOf("Empuje"), "el más abandonado va primero");
+  assert(p.includes("Sin trabajar nunca:"), "lista las zonas no usadas");
+  assert(p.indexOf("Pierna") < p.indexOf("Pecho"), "la más abandonada va primero");
+});
+
+Deno.test("el prompt del consejo también pide español neutro", () => {
+  const p = buildPrompt(summarize(cleanWorkouts([{ date: "2026-09-05" }]), HOY));
+  assert(p.includes("español neutro"));
+  assert(/Trata de "tú"/.test(p));
+  assertEquals(/\bSos\b|\bHablás\b|\bBasate\b|\bMencioná\b|\bDevolvé\b/.test(p), false,
+    "las instrucciones ya no van en voseo");
 });
 
 Deno.test("parseModelJson acepta JSON pelado, con vallas y con texto alrededor", () => {

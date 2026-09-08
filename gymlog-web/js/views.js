@@ -13,11 +13,13 @@
   var NONE = '<span class="none">sin datos</span>';
 
   /* El tipo de entreno es opcional: sin etiqueta se dice, no se inventa. */
-  function typeValue(key) {
-    var label = GL.store.workoutTypeLabel(key);
+  /* Recibe la sesión entera, no una clave: la etiqueta puede venir de la
+     selección nueva por músculos o de la etiqueta vieja de una sola opción. */
+  function typeValue(w) {
+    var label = GL.store.focusLabel(w);
     return label
       ? '<span class="typeval">' + esc(label) + '</span>'
-      : '<span class="none">sin tipo</span>';
+      : '<span class="none">sin marcar</span>';
   }
 
   function fmtWeight(v, units) {
@@ -336,8 +338,11 @@
       (w.demo ? '<span class="pill demo">ejemplo</span>' : '') +
       '</div>' +
       '<h3>' + (w.went ? 'Sesión completada' : 'No fui') + '</h3>' +
-      (w.went && GL.store.workoutTypeLabel(w.type)
-        ? '<span class="pill type">' + esc(GL.store.workoutTypeLabel(w.type)) + '</span>'
+      (w.went && GL.store.focusLabel(w)
+        ? '<span class="pill type">' + esc(GL.store.focusLabel(w)) + '</span>' +
+          (GL.store.focusMuscles(w).length
+            ? '<span class="pill musc">' + esc(GL.store.focusMuscles(w).join(', ')) + '</span>'
+            : '')
         : '') +
       (w.went
         ? '<div class="metrics">' +
@@ -495,6 +500,9 @@
       '</div>';
   }
 
+  /* Cuántos mensajes tenía el chat la última vez que se pintó. */
+  var ultimoChat = -1;
+
   function coachScreen(ctx) {
     var p = ctx.photos || {};
     var html = '';
@@ -546,11 +554,20 @@
       }).join('') + '</div>';
     }
 
-    /* El registro de la charla se pinta entero en cada render, así que hay
-       que volver a bajarlo: si no, un mensaje nuevo queda fuera de vista. */
+    /* El registro se pinta entero en cada render. Bajarlo siempre sería
+       arrastrar a la persona al final justo cuando está leyendo algo de más
+       arriba, así que solo se salta al fondo cuando hay un mensaje nuevo (o
+       uno en camino). data-pinned le dice a render() que no devuelva el
+       scroll anterior: en ese caso mandamos nosotros. */
     function mount() {
       var log = document.getElementById('chat-log');
-      if (log) log.scrollTop = log.scrollHeight;
+      if (!log) return;
+      var n = (ctx.chat.messages || []).length + (ctx.chat.pending ? 1 : 0);
+      if (n !== ultimoChat) {
+        log.scrollTop = log.scrollHeight;
+        log.setAttribute('data-pinned', '1');
+      }
+      ultimoChat = n;
     }
 
     return { html: html, mount: mount };
@@ -611,8 +628,11 @@
           '<div class="tiles three" style="margin-top:8px">' +
           tile('Dificultad', w.difficulty + '<small>/5</small>') +
           tile('Peso', w.weight != null ? fmtWeight(w.weight, ctx.settings.units) : NONE) +
-          tile('Tipo', typeValue(w.type)) +
+          tile('Trabajado', typeValue(w)) +
           '</div>' +
+          (GL.store.focusMuscles(w).length
+            ? '<p class="musclist">' + esc(GL.store.focusMuscles(w).join(' · ')) + '</p>'
+            : '') +
           (w.notes ? '<p style="margin:14px 0 0;font-size:14px;color:var(--text-dim);border-left:1px solid var(--border-strong);padding-left:11px">' + esc(w.notes) + '</p>' : '')
           : '<p class="muted" style="margin:0 0 14px;font-size:14px">' +
           (status === 'open' ? 'Día programado sin registrar. Te ' +
@@ -1316,7 +1336,10 @@
     html += sectionTitle('Cuenta');
     html += callout('is-good', 'shield', 'Sincronizado',
       'Conectado como <b>' + esc(ctx.cloud ? ctx.cloud.email : '') + '</b>. Tus datos se guardan solos en tu cuenta.' +
-      (s.lastSync ? ' Última sincronización hace ' + (ctx.syncAge === 0 ? 'menos de un día' : ctx.syncAge + ' días') + '.' : ''));
+      '<span id="sync-age">' + (s.lastSync
+        ? ' Última sincronización hace ' +
+          (ctx.syncAge === 0 ? 'menos de un día' : ctx.syncAge + ' días') + '.'
+        : '') + '</span>');
     html += '<div class="card flush">' +
       '<button class="row" data-act="cloud-sync"><div class="t"><b>Sincronizar ahora</b>' +
       '<small>Forzar una subida, por si acaso.</small></div>' + icon('upload') + '</button>' +

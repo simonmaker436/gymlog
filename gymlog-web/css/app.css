@@ -1140,10 +1140,20 @@ main {
 .pill.warn { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .pill.demo { background: transparent; color: var(--text-muted); border-style: dashed; }
 .pill.type { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 38%, transparent); }
+/* Los músculos van en una píldora secundaria: son el detalle, no el titular. */
+.pill.musc {
+  text-transform: none;
+  letter-spacing: .02em;
+  font-family: var(--font-body, inherit);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
 .entry .pill.type { margin-top: 8px; }
+.entry .pill.musc { margin: 8px 0 0 6px; }
 
-/* «Full body» no entra en la tipografía enorme de las casillas, así que el
-   tipo de entreno se muestra un paso más chico. */
+/* «Pierna · Brazo» no entra en la tipografía enorme de las casillas, así que
+   lo trabajado se muestra un paso más chico. */
 .tile .v .typeval {
   font-size: clamp(16px, 4.4vw, 19px);
   line-height: 1.15;
@@ -1203,6 +1213,69 @@ main {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
+}
+
+/* -------------------------------------------- músculos del formulario
+   Debajo de la rejilla de categorías se despliega un panel por cada una
+   marcada. La lista sale de MUSCLE_GROUPS (store.js); acá solo se le da
+   forma. */
+#f-panels:not(:empty) { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+
+.focus-panel {
+  padding: 11px 12px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent-line);
+  border-radius: var(--r-2);
+  animation: focus-in .18s cubic-bezier(.2, .9, .3, 1) both;
+}
+@keyframes focus-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.focus-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 9px;
+}
+.focus-head b {
+  flex: 1;
+  font-family: var(--font-cond);
+  font-size: 13px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase;
+  color: var(--text-dim);
+}
+.focus-all {
+  flex: none;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.focus-muscles { display: flex; flex-wrap: wrap; gap: 7px; }
+.focus-muscles button {
+  min-height: 36px;
+  padding: 7px 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+}
+.focus-muscles button:hover { color: var(--text); border-color: var(--border-strong); }
+.focus-muscles button.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Los músculos del día, bajo las casillas del calendario. */
+.musclist {
+  margin: 10px 0 0;
+  font-size: 13px; line-height: 1.5;
+  color: var(--text-muted);
 }
 
 /* ------------------------------------------------------------ gráficos */

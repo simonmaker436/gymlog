@@ -37,18 +37,51 @@ export type { Advice, AskResult } from "../_shared/ai.ts";
 
 const MAX_WORKOUTS = 30;
 
-export const TYPE_LABELS: Record<string, string> = {
+/* Las zonas que se marcan hoy. Tiene que coincidir con MUSCLE_GROUPS de
+   store.js; si allá se agrega una, acá también. */
+export const GROUP_LABELS: Record<string, string> = {
   pierna: "Pierna",
+  brazo: "Brazo",
+  abdomen: "Abdomen",
+  pecho: "Pecho",
+  espalda: "Espalda",
+  otro: "Otro",
+};
+
+/* Etiquetas de cuando cada sesión llevaba una sola. Ya no se pueden elegir,
+   pero siguen en el historial y no hay que perderlas. */
+export const LEGACY_LABELS: Record<string, string> = {
   empuje: "Empuje",
   tiron: "Tirón",
   fullbody: "Full body",
   cardio: "Cardio",
-  otro: "Otro",
+};
+
+export const TYPE_LABELS: Record<string, string> = { ...GROUP_LABELS, ...LEGACY_LABELS };
+
+export const MUSCLE_LABELS: Record<string, string> = {
+  cuadriceps: "Cuádriceps",
+  isquiotibiales: "Isquiotibiales",
+  gluteos: "Glúteos",
+  pantorrillas: "Pantorrillas",
+  biceps: "Bíceps",
+  triceps: "Tríceps",
+  antebrazo: "Antebrazo",
+  abdominales: "Abdominales",
+  oblicuos: "Oblicuos",
+  "pectoral-superior": "Pectoral superior",
+  "pectoral-medio": "Pectoral medio",
+  "pectoral-inferior": "Pectoral inferior",
+  dorsales: "Dorsales",
+  trapecio: "Trapecio",
+  romboides: "Romboides",
+  lumbares: "Lumbares",
 };
 
 export interface InWorkout {
   date?: unknown;
-  type?: unknown;
+  type?: unknown;   // etiqueta vieja, de una sola opción
+  focus?: unknown;  // { groups: [...], muscles: [...] }
   energy?: unknown;
   feeling?: unknown;
   difficulty?: unknown;
@@ -58,7 +91,10 @@ export interface InWorkout {
 
 export interface CleanWorkout {
   date: string;
-  type: string | null;
+  /* Una sesión puede tocar varias zonas. Las de antes traen una sola, la que
+     tuvieran en `type`. */
+  groups: string[];
+  muscles: string[];
   energy: number | null;
   feeling: number | null;
   difficulty: number | null;
@@ -79,10 +115,33 @@ export function cleanWorkouts(raw: unknown): CleanWorkout[] {
       ? w.date
       : null;
     if (!date) continue;
-    const type = typeof w.type === "string" && TYPE_LABELS[w.type] ? w.type : null;
+    /* Primero la selección nueva; si no hay, la etiqueta vieja. Nunca las
+       dos, para no contar la misma sesión dos veces. */
+    const focus = (w.focus && typeof w.focus === "object" && !Array.isArray(w.focus))
+      ? w.focus as { groups?: unknown; muscles?: unknown }
+      : null;
+
+    const groups: string[] = [];
+    if (Array.isArray(focus?.groups)) {
+      for (const g of focus.groups) {
+        if (typeof g === "string" && GROUP_LABELS[g] && !groups.includes(g)) groups.push(g);
+      }
+    }
+    if (!groups.length && typeof w.type === "string" && TYPE_LABELS[w.type]) {
+      groups.push(w.type);
+    }
+
+    const muscles: string[] = [];
+    if (groups.length && Array.isArray(focus?.muscles)) {
+      for (const m of focus.muscles) {
+        if (typeof m === "string" && MUSCLE_LABELS[m] && !muscles.includes(m)) muscles.push(m);
+      }
+    }
+
     out.push({
       date,
-      type,
+      groups,
+      muscles: muscles.slice(0, 16),
       energy: clamp15(w.energy),
       feeling: clamp15(w.feeling),
       difficulty: clamp15(w.difficulty),
@@ -123,18 +182,25 @@ export interface Summary {
   total: number;
   today: string;
   types: TypeStat[];
+  muscles: { label: string; count: number }[];
   untyped: number;
   avgEnergy: number | null;
   avgFeeling: number | null;
   avgDifficulty: number | null;
-  lastNotes: { date: string; type: string | null; notes: string }[];
+  lastNotes: { date: string; type: string | null; notes: string }[];  // type = zonas ya en texto
   lastEnergies: number[];
 }
 
 /* Los hechos, calculados acá y no por el modelo. */
 export function summarize(workouts: CleanWorkout[], today: string): Summary {
-  const types: TypeStat[] = Object.keys(TYPE_LABELS).map((key) => {
-    const mine = workouts.filter((w) => w.type === key);
+  /* Solo se listan las zonas elegibles hoy más las viejas que la persona
+     realmente usó: si no, aparecerían «Tirón: 0 sesiones» para siempre. */
+  const vigentes = Object.keys(GROUP_LABELS);
+  const historicas = Object.keys(LEGACY_LABELS)
+    .filter((k) => workouts.some((w) => w.groups.includes(k)));
+
+  const types: TypeStat[] = [...vigentes, ...historicas].map((key) => {
+    const mine = workouts.filter((w) => w.groups.includes(key));
     const last = mine[0]; // ya vienen ordenados de más nuevo a más viejo
     return {
       key,
@@ -150,18 +216,32 @@ export function summarize(workouts: CleanWorkout[], today: string): Summary {
     return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
   };
 
+  /* Los músculos concretos, de más a menos marcados. */
+  const cuenta = new Map<string, number>();
+  for (const w of workouts) {
+    for (const m of w.muscles) cuenta.set(m, (cuenta.get(m) ?? 0) + 1);
+  }
+  const muscles = [...cuenta.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, count]) => ({ label: MUSCLE_LABELS[key], count }));
+
   return {
     total: workouts.length,
     today,
     types,
-    untyped: workouts.filter((w) => !w.type).length,
+    muscles,
+    untyped: workouts.filter((w) => !w.groups.length).length,
     avgEnergy: avg((w) => w.energy),
     avgFeeling: avg((w) => w.feeling),
     avgDifficulty: avg((w) => w.difficulty),
     lastNotes: workouts
       .filter((w) => w.notes)
       .slice(0, 8)
-      .map((w) => ({ date: w.date, type: w.type, notes: w.notes })),
+      .map((w) => ({
+        date: w.date,
+        type: w.groups.length ? w.groups.map((g) => TYPE_LABELS[g]).join(" y ") : null,
+        notes: w.notes,
+      })),
     lastEnergies: workouts.slice(0, 6).map((w) => w.energy).filter(
       (n): n is number => n != null,
     ),
@@ -183,26 +263,34 @@ export function buildPrompt(s: Summary): string {
 
   const notas = s.lastNotes.length
     ? s.lastNotes
-      .map((n) =>
-        `- ${n.date}${n.type ? ` (${TYPE_LABELS[n.type]})` : ""}: ${n.notes}`
-      )
+      .map((n) => `- ${n.date}${n.type ? ` (${n.type})` : ""}: ${n.notes}`)
       .join("\n")
     : "(sin notas)";
 
-  return `Sos el entrenador de una app de registro de gimnasio llamada GymLog.
-Hablás en español rioplatense (vos, tenés, hacés), directo y sin florituras.
+  const musculos = s.muscles.length
+    ? s.muscles.map((m) => `${m.label} (${m.count})`).join(", ")
+    : "(todavía sin detallar)";
 
-MUY IMPORTANTE: la app NO registra ejercicios, series, repeticiones ni pesos
-levantados. Solo guarda: fecha, tipo de entreno, duración, energía (1-5),
-sensación (1-5), dificultad (1-5), peso corporal y notas libres. No inventes
-ejercicios concretos ni rutinas con series y repeticiones.
+  return `Eres el entrenador de una aplicación de registro de gimnasio
+llamada GymLog.
+
+IDIOMA: escribe en español neutro, el que entiende cualquier hispanohablante.
+Trata de "tú", nunca de "vos". Sin modismos ni jerga de ningún país (nada de
+"che", "vale", "órale", "guay"). Directo y sin florituras.
+
+MUY IMPORTANTE: la aplicación NO registra ejercicios, series, repeticiones ni
+pesos levantados. Solo guarda: fecha, zonas y músculos trabajados, duración,
+energía (1-5), sensación (1-5), dificultad (1-5), peso corporal y notas
+libres. No inventes ejercicios concretos ni rutinas con series y repeticiones.
 
 Datos reales de las últimas ${s.total} sesiones (hoy es ${s.today}):
 
-Por tipo de entreno:
-${lineas || "(todavía sin tipos registrados)"}
-${nunca.length ? `Sin registrar nunca: ${nunca.map((t) => t.label).join(", ")}.` : ""}
-${s.untyped ? `Sesiones sin tipo asignado: ${s.untyped}.` : ""}
+Por zona trabajada:
+${lineas || "(todavía sin zonas registradas)"}
+${nunca.length ? `Sin trabajar nunca: ${nunca.map((t) => t.label).join(", ")}.` : ""}
+${s.untyped ? `Sesiones sin nada marcado: ${s.untyped}.` : ""}
+
+Músculos concretos marcados (veces): ${musculos}
 
 Medias del período: energía ${s.avgEnergy ?? "s/d"}/5, sensación ${
     s.avgFeeling ?? "s/d"
@@ -214,16 +302,16 @@ Energía de las últimas sesiones (de más nueva a más vieja): ${
 Notas recientes:
 ${notas}
 
-Devolvé exactamente dos campos:
+Devuelve exactamente dos campos:
 
-"recomendacion": qué tipo de entreno le conviene hacer hoy o el próximo día.
-Basate sobre todo en qué tipo lleva más tiempo sin entrenar, usando los días
-reales de arriba. Una o dos frases. Mencioná algo que viene haciendo bien
-antes de sugerir el que tiene abandonado.
+"recomendacion": qué zona le conviene trabajar hoy o el próximo día. Básate
+sobre todo en cuál lleva más tiempo sin tocar, usando los días reales de
+arriba. Una o dos frases. Menciona algo que viene haciendo bien antes de
+sugerir la que tiene abandonada.
 
-"consejo": una observación corta sobre el patrón de sus notas, energía y
+"consejo": una observación corta sobre el patrón de sus notas, su energía y su
 sensación recientes. Una o dos frases, concreta y accionable. Si las notas no
-dan para nada, hablá de la tendencia de energía o de la constancia. Nada de
+dan para nada, habla de la tendencia de energía o de la constancia. Nada de
 consejos médicos ni de nutrición.
 
 No repitas cifras que no estén en los datos de arriba.`;

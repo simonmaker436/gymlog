@@ -350,6 +350,9 @@ Deno.test("el prompt de fotos prohíbe diagnosticar e inventar rutinas", () => {
   assert(/grasa corporal/i.test(p), "prohíbe estimar grasa corporal");
   assert(/series/.test(p), "recuerda que no hay series");
   assert(/nutrici[óo]n/i.test(p), "prohíbe consejos de nutrición");
+  assert(p.includes("español neutro"), "el análisis también va en neutro");
+  assertEquals(/\bSos\b|\bComentá\b|\bdecilo\b|\bDevolvé\b/.test(p), false,
+    "sin voseo");
 });
 
 Deno.test("con una sola foto el prompt lo dice en singular", () => {

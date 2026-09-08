@@ -27,8 +27,9 @@ export interface Perfil {
   esteMes?: number;
   rachaSemanas?: number;
   minutosPromedio?: number;
-  tiposFrecuentes?: string[];
-  ultimaSesion?: string;    // YYYY-MM-DD
+  tiposFrecuentes?: string[];    // zonas: Pierna, Pecho…
+  musculosFrecuentes?: string[]; // músculos concretos: Cuádriceps, Bíceps…
+  ultimaSesion?: string;         // YYYY-MM-DD
 }
 
 const num = (v: unknown): number | undefined =>
@@ -53,7 +54,10 @@ export function limpiarPerfil(raw: unknown): Perfil | null {
     rachaSemanas: num(r.rachaSemanas),
     minutosPromedio: num(r.minutosPromedio),
     tiposFrecuentes: Array.isArray(r.tiposFrecuentes)
-      ? r.tiposFrecuentes.map((t) => str(t, 20)).filter((t): t is string => !!t).slice(0, 4)
+      ? r.tiposFrecuentes.map((t) => str(t, 30)).filter((t): t is string => !!t).slice(0, 5)
+      : undefined,
+    musculosFrecuentes: Array.isArray(r.musculosFrecuentes)
+      ? r.musculosFrecuentes.map((t) => str(t, 30)).filter((t): t is string => !!t).slice(0, 6)
       : undefined,
     ultimaSesion: typeof r.ultimaSesion === "string" &&
         /^\d{4}-\d{2}-\d{2}$/.test(r.ultimaSesion)
@@ -81,7 +85,10 @@ export function describirPerfil(p: Perfil | null): string {
   if (p.rachaSemanas) l.push(`Racha actual: ${p.rachaSemanas} semanas cumplidas seguidas.`);
   if (p.minutosPromedio) l.push(`Sus sesiones duran ${p.minutosPromedio} minutos de promedio.`);
   if (p.tiposFrecuentes?.length) {
-    l.push(`Los tipos de entreno que más registra: ${p.tiposFrecuentes.join(", ")}.`);
+    l.push(`Las zonas que más trabaja: ${p.tiposFrecuentes.join(", ")}.`);
+  }
+  if (p.musculosFrecuentes?.length) {
+    l.push(`Los músculos que más marca: ${p.musculosFrecuentes.join(", ")}.`);
   }
   if (p.ultimaSesion) l.push(`Su última sesión registrada es del ${p.ultimaSesion}.`);
 
@@ -94,36 +101,41 @@ repitas en cada respuesta.`;
    explícitos: es un chat abierto, y sin ellos la IA se pone a diagnosticar
    dolores y a recetar dietas. */
 export function buildChatSystem(p: Perfil | null, hoy?: string): string {
-  return `Sos el entrenador personal de GymLog, una app donde la persona
-registra si fue al gimnasio, cuánto duró la sesión y cómo se sintió.
+  return `Eres el entrenador personal de GymLog, una aplicación donde la
+persona registra si fue al gimnasio, cuánto duró la sesión, cómo se sintió y
+qué zonas o músculos trabajó.
 
-Hablás en español rioplatense (vos, tenés, hacés, podés), en tono cercano y
-directo, como un entrenador de barrio que sabe: nada de corporativo ni de
-motivacional vacío.${hoy ? `\nHoy es ${hoy}.` : ""}
+IDIOMA (importante): escribe en español neutro, el que entiende cualquier
+hispanohablante. Trata siempre de "tú", nunca de "vos" ni de "ustedes" como
+segunda persona del singular. No uses modismos ni jerga de ningún país
+—ni argentinos, ni mexicanos, ni españoles—: nada de "che", "vale", "órale",
+"guay", "chido", "laburo", "pibe" ni similares. Usa palabras que se entiendan
+en cualquier lado: "entrenamiento" y no "entreno" o "chamba", "levantar peso"
+y no "hacer fierros". Tono cercano y directo, pero sin color local.
 
-CÓMO RESPONDÉS:
-- Corto. Dos a cinco frases salvo que te pidan explícitamente el detalle.
+CÓMO RESPONDES:
+- Corto. De dos a cinco frases, salvo que te pidan el detalle.
 - Texto corriente, sin markdown, sin asteriscos, sin títulos ni viñetas.
-- Concreto y accionable. Si algo depende de la persona, decilo en vez de
+- Concreto y accionable. Si algo depende de la persona, dilo en lugar de
   inventar una certeza.
-- Si no sabés algo, decilo.
+- Si no sabes algo, dilo.${hoy ? `\n- Hoy es ${hoy}.` : ""}
 
 LÍMITES (importantes):
-- No sos médico ni nutricionista. Nada de diagnósticos, de interpretar
+- No eres médico ni nutricionista. Nada de diagnósticos, de interpretar
   síntomas ni de recomendar medicación. Si describe dolor, lesión, mareos o
-  cualquier señal preocupante, decile con claridad que eso lo tiene que ver
-  un profesional, y no des ejercicios "para arreglarlo".
+  cualquier señal preocupante, dile con claridad que eso lo tiene que ver un
+  profesional, y no le des ejercicios "para arreglarlo".
 - De nutrición, solo lo general y sensato (comer suficiente proteína,
-  hidratarse, no saltear comidas). Nada de planes de dieta, de contar
-  calorías por vos ni de recomendar suplementos, dosis o sustancias.
+  hidratarse, no saltarse comidas). Nada de planes de dieta, de contar
+  calorías por él ni de recomendar suplementos, dosis o sustancias.
 - Nunca sugieras nada relacionado con esteroides ni con ayudas de ese tipo,
-  aunque te lo pidan directamente.
-- Sobre su progreso, hablá de lo que la app registra de verdad: constancia,
-  duración, energía, sensación, dificultad. GymLog NO guarda ejercicios,
-  series, repeticiones ni pesos levantados, así que no cites datos de esos
-  como si los tuvieras.
-- Si te preguntan algo que no tiene nada que ver con entrenar, con el
-  cuerpo o con hábitos, decí amablemente que de eso no vas a poder ayudar.${describirPerfil(p)}`;
+  aunque te lo pida directamente.
+- Sobre su progreso, habla de lo que la aplicación registra de verdad:
+  constancia, duración, energía, sensación, dificultad y las zonas o músculos
+  que marca. GymLog NO guarda ejercicios, series, repeticiones ni pesos
+  levantados, así que no cites datos de esos como si los tuvieras.
+- Si te preguntan algo que no tiene nada que ver con entrenar, con el cuerpo
+  o con los hábitos, di amablemente que de eso no vas a poder ayudar.${describirPerfil(p)}`;
 }
 
 /* Los mensajes también llegan del navegador. Se quedan los últimos MAX_TURNS

@@ -10,16 +10,36 @@ import {
   MAX_TURNS,
 } from "./chatPrompt.ts";
 
-Deno.test("el prompt fija el tono y los límites de seguridad", () => {
+Deno.test("el prompt fija el idioma, el tono y los límites de seguridad", () => {
   const s = buildChatSystem(null);
-  assert(s.includes("rioplatense"), "el tono está declarado");
-  assert(/No sos médico ni nutricionista/.test(s), "no diagnostica");
+  assert(s.includes("español neutro"), "el idioma está declarado");
+  assert(/No eres médico ni nutricionista/.test(s), "no diagnostica");
   assert(/esteroides/.test(s), "corta el tema por adelantado");
   assert(/sin markdown/.test(s), "responde en texto plano");
   assert(
     s.replace(/\s+/g, " ").includes("NO guarda ejercicios, series, repeticiones ni pesos"),
     "no puede citar datos que la app no tiene",
   );
+});
+
+/* El motivo del cambio: la IA respondía con voseo argentino. Que quede
+   fijado por una prueba, para que no vuelva sin querer. */
+Deno.test("pide español neutro y prohíbe los regionalismos por su nombre", () => {
+  const s = buildChatSystem(null);
+  assert(/Trata siempre de "tú"/.test(s), "tuteo explícito");
+  assert(/nunca de "vos"/.test(s), "el voseo queda prohibido");
+  for (const jerga of ["che", "vale", "órale", "guay", "chido"]) {
+    assert(s.includes(jerga), `da ${jerga} como ejemplo de lo que no se usa`);
+  }
+});
+
+/* Las instrucciones también van en neutro: escritas en voseo, el modelo
+   contestaba en voseo aunque se le pidiera lo contrario. */
+Deno.test("las propias instrucciones están escritas sin voseo", () => {
+  const s = buildChatSystem({ nombre: "Ana", diasPorSemana: 3 });
+  const voseo = /\b(sos|hablás|tenés|hacés|podés|decilo|decí|limitate|fijate|mirá|dale)\b/i;
+  const encontrado = s.match(voseo);
+  assertEquals(encontrado, null, `se coló voseo: ${encontrado?.[0]}`);
 });
 
 Deno.test("sin perfil el prompt no habla de la persona", () => {
@@ -40,6 +60,15 @@ Deno.test("la fecha de hoy entra en el prompt cuando se pasa", () => {
   assert(buildChatSystem(null, "2026-09-08").includes("Hoy es 2026-09-08"));
 });
 
+Deno.test("los músculos marcados llegan al contexto", () => {
+  const t = describirPerfil({
+    tiposFrecuentes: ["Pierna", "Pecho"],
+    musculosFrecuentes: ["Cuádriceps", "Glúteos"],
+  });
+  assert(t.includes("Las zonas que más trabaja: Pierna, Pecho."));
+  assert(t.includes("Los músculos que más marca: Cuádriceps, Glúteos."));
+});
+
 Deno.test("limpiarPerfil descarta basura y tipos equivocados", () => {
   const p = limpiarPerfil({
     nombre: "  Ana  ",
@@ -47,7 +76,8 @@ Deno.test("limpiarPerfil descarta basura y tipos equivocados", () => {
     alturaCm: 170,
     pesoKg: -5,
     diasPorSemana: 4.4,
-    tiposFrecuentes: ["Pierna", 7, "Empuje"],
+    tiposFrecuentes: ["Pierna", 7, "Pecho"],
+    musculosFrecuentes: ["Cuádriceps", null, "Bíceps"],
     ultimaSesion: "ayer",
     inventado: "no debería pasar",
   });
@@ -56,7 +86,8 @@ Deno.test("limpiarPerfil descarta basura y tipos equivocados", () => {
   assertEquals(p?.alturaCm, 170);
   assertEquals(p?.pesoKg, undefined, "un peso negativo no vale");
   assertEquals(p?.diasPorSemana, 4, "se redondea");
-  assertEquals(p?.tiposFrecuentes, ["Pierna", "Empuje"]);
+  assertEquals(p?.tiposFrecuentes, ["Pierna", "Pecho"]);
+  assertEquals(p?.musculosFrecuentes, ["Cuádriceps", "Bíceps"]);
   assertEquals(p?.ultimaSesion, undefined, "solo YYYY-MM-DD");
   assertEquals((p as Record<string, unknown>).inventado, undefined, "no copia campos ajenos");
 });

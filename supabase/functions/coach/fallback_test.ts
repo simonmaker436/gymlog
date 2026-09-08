@@ -90,15 +90,18 @@ Deno.test("Groq recibe EXACTAMENTE el mismo contexto que Gemini", async () =>
     /* El de Groq es el mismo, más las instrucciones de formato al final. */
     assert(aGroq.startsWith(aGemini), "Groq no recibió el mismo contexto base");
 
-    // los hechos calculados tienen que estar en los dos
+    /* Los hechos calculados tienen que estar en los dos. Se comparan con los
+       saltos de línea colapsados: el prompt va justificado a 78 columnas y una
+       frase puede partirse en dos líneas. */
+    const plano = (t: string) => t.replace(/\s+/g, " ");
     for (const hecho of [
       "Pierna: 1 sesión, última hace 13 días",
       "Empuje: 2 sesiones, última hace 2 días",
       "NO registra ejercicios, series, repeticiones ni pesos",
       "dormi mal",
     ]) {
-      assert(aGemini.includes(hecho), `falta en Gemini: ${hecho}`);
-      assert(aGroq.includes(hecho), `falta en Groq: ${hecho}`);
+      assert(plano(aGemini).includes(hecho), `falta en Gemini: ${hecho}`);
+      assert(plano(aGroq).includes(hecho), `falta en Groq: ${hecho}`);
     }
 
     // y lo único que se le suma a Groq es cómo devolver el JSON

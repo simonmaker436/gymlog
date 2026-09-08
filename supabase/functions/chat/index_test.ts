@@ -194,7 +194,7 @@ Deno.test("si Gemini se queda sin cuota contesta Groq", async () =>
     const q = llamadas.find((l) => l.url.includes("groq"))!;
     const msgs = q.body.messages as { role: string; content: string }[];
     assertEquals(msgs[0].role, "system");
-    assert(msgs[0].content.includes("rioplatense"));
+    assert(msgs[0].content.includes("español neutro"));
     assertEquals(msgs[1], { role: "user", content: "hola" });
   }));
 
