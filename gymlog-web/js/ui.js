@@ -40,6 +40,8 @@
     /* el entrenador: una chispa, para no repetir la pesa del logo */
     spark: '<path d="M12 2.5 14.2 9 20.5 11 14.2 13 12 19.5 9.8 13 3.5 11 9.8 9z"/><path d="M18.5 3v3.4M17 4.7h3"/>',
     send: '<path d="M4 12 20.5 4 13 20.5 11.4 13.6z"/><path d="M11.4 13.6 4 12"/>',
+    sun: '<path d="M12 7.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z"/><path d="M12 2v2.6M12 19.4V22M2 12h2.6M19.4 12H22M4.9 4.9l1.9 1.9M17.2 17.2l1.9 1.9M19.1 4.9l-1.9 1.9M6.8 17.2l-1.9 1.9"/>',
+    moon: '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a7.5 7.5 0 1 0 10.5 10.5z"/>',
     filter: '<path d="M3 5h18l-7 8v6l-4 2v-8L3 5z"/>',
 
     /* significado */

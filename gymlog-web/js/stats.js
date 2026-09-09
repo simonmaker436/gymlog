@@ -765,6 +765,26 @@
       }
     }
 
+    /* 3b. de día contra de noche
+       Hacen falta al menos 4 de cada lado: con dos sesiones de noche, una
+       mala tarde ya movería la media medio punto y diría cualquier cosa. */
+    var bl = byLight(workouts);
+    if (bl && bl.dia.count >= 4 && bl.noche.count >= 4) {
+      var pares = [['feeling', 'sensación'], ['energy', 'energía']];
+      for (var pi = 0; pi < pares.length; pi++) {
+        var k = pares[pi][0], nombre = pares[pi][1];
+        var vd = bl.dia[k], vn = bl.noche[k];
+        if (vd == null || vn == null) continue;
+        if (Math.abs(vd - vn) < 0.4) continue;
+        var mejor = vd > vn ? 'de día' : 'de noche';
+        out.push('Entrenas mejor <b>' + mejor + '</b>: tu ' + nombre + ' media es <b>' +
+          vd.toString().replace('.', ',') + '</b> de día (' + bl.dia.count +
+          ' sesiones) y <b>' + vn.toString().replace('.', ',') + '</b> de noche (' +
+          bl.noche.count + ').');
+        break;   // una sola conclusión de esto, la más marcada
+      }
+    }
+
     /* 4. constancia por semanas */
     var pw = perfectWeeks(workouts, gymDays, ref, startDate, windowDays);
     if (pw.total >= 1) {
@@ -782,6 +802,37 @@
     }
 
     return out;
+  }
+
+  /* ------------------------------------------------- de día o de noche
+     Compara las sesiones etiquetadas por sun.js. Devuelve las dos ramas con
+     sus medias, o null si no hay material para comparar nada. */
+  function byLight(workouts) {
+    var d = done(workouts).filter(function (w) { return w.light === 'dia' || w.light === 'noche'; });
+    if (!d.length) return null;
+
+    var media = function (list, k) {
+      var v = list.map(function (w) { return w[k]; }).filter(function (x) { return x != null; });
+      if (!v.length) return null;
+      return Math.round((v.reduce(function (a, b) { return a + b; }, 0) / v.length) * 10) / 10;
+    };
+
+    var arma = function (key) {
+      var list = d.filter(function (w) { return w.light === key; });
+      var durs = list.map(function (w) { return w.duration; }).filter(Boolean);
+      return {
+        key: key,
+        count: list.length,
+        energy: media(list, 'energy'),
+        feeling: media(list, 'feeling'),
+        difficulty: media(list, 'difficulty'),
+        avgDuration: durs.length
+          ? Math.round(durs.reduce(function (a, b) { return a + b; }, 0) / durs.length)
+          : null
+      };
+    };
+
+    return { dia: arma('dia'), noche: arma('noche'), total: d.length };
   }
 
   /* Duración típica, para rellenar el formulario sin que tengas que pensar. */
@@ -852,7 +903,7 @@
     streaks: streaks, attendance: attendance, summarize: summarize, inRange: inRange,
     weekSummary: weekSummary, monthSummary: monthSummary, bestStreakInRange: bestStreakInRange,
     monthKeysCovering: monthKeysCovering, monthlySeries: monthlySeries,
-    energySeries: energySeries, weightSeries: weightSeries,
+    energySeries: energySeries, weightSeries: weightSeries, byLight: byLight,
     MEASURE_FIELDS: MEASURE_FIELDS, measureValue: measureValue, measureField: measureField, measureSeries: measureSeries,
     overall: overall, nextGymDay: nextGymDay, calendarGrid: calendarGrid,
     firstDate: firstDate,

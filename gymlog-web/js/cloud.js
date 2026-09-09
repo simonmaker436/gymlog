@@ -195,6 +195,33 @@
       });
   }
 
+  /* --------------------------------------------------------- unsplash
+     La clave vive en la función. Un fallo acá NO es grave: la tarjeta para
+     compartir sale igual con su fondo de siempre, así que el error se
+     devuelve tal cual y quien llama decide. */
+  function unsplash(category) {
+    var c = sb();
+    if (!c) return Promise.reject(new Error('No hay conexión con la nube ahora mismo.'));
+    return c.functions.invoke('unsplash', { body: { category: category || null } })
+      .then(function (r) {
+        if (r.error) {
+          var ctxRes = r.error.context;
+          if (ctxRes && typeof ctxRes.json === 'function') {
+            return ctxRes.json()
+              .then(function (b) { throw new Error((b && b.error) || coachError(r.error)); })
+              ['catch'](function (e) {
+                throw (e instanceof Error ? e : new Error(coachError(r.error)));
+              });
+          }
+          throw new Error(coachError(r.error));
+        }
+        if (!r.data || !r.data.imageUrl) {
+          throw new Error((r.data && r.data.error) || 'Unsplash no devolvió ninguna foto.');
+        }
+        return r.data;
+      });
+  }
+
   /* ------------------------------------------------------------- fotos
      Todo pasa por la Edge Function «photos»: el navegador nunca toca el
      bucket directamente ni conoce su nombre. El id de usuario lo saca la
@@ -280,6 +307,7 @@
     pull: pull,
     coach: coach,
     chat: chat,
+    unsplash: unsplash,
     listPhotos: listPhotos,
     uploadPhoto: uploadPhoto,
     deletePhoto: deletePhoto,

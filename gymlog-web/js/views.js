@@ -338,10 +338,16 @@
       (w.demo ? '<span class="pill demo">ejemplo</span>' : '') +
       '</div>' +
       '<h3>' + (w.went ? 'Sesión completada' : 'No fui') + '</h3>' +
-      (w.went && GL.store.focusLabel(w)
-        ? '<span class="pill type">' + esc(GL.store.focusLabel(w)) + '</span>' +
+      (w.went && (GL.store.focusLabel(w) || w.light)
+        ? (GL.store.focusLabel(w)
+            ? '<span class="pill type">' + esc(GL.store.focusLabel(w)) + '</span>'
+            : '') +
           (GL.store.focusMuscles(w).length
             ? '<span class="pill musc">' + esc(GL.store.focusMuscles(w).join(', ')) + '</span>'
+            : '') +
+          (w.light
+            ? '<span class="pill light">' + icon(w.light === 'dia' ? 'sun' : 'moon') +
+              esc(GL.store.lightLabel(w.light)) + '</span>'
             : '')
         : '') +
       (w.went
@@ -419,10 +425,13 @@
     html += sectionTitle('Tarjeta para compartir');
     html += '<div class="card">' +
       '<p class="muted" style="margin:0 0 14px;font-size:13.5px">' +
-      'Una imagen con tu racha, tus totales y tus marcas, lista para guardar.</p>' +
+      'Una imagen con tu racha, tus totales y tus marcas, sobre una foto acorde ' +
+      'a lo último que entrenaste.</p>' +
       '<div class="btn-row">' +
       '<button class="btn primary" data-act="share-card">' + icon('image') + 'Generar</button>' +
-      '</div></div>';
+      '</div>' +
+      credito(ctx.credit) +
+      '</div>';
 
     return html;
   }
@@ -498,6 +507,19 @@
           icon('trash') + 'Borrar la charla</button></div>'
         : '') +
       '</div>';
+  }
+
+  /* La atribución que exigen los términos de Unsplash: el fotógrafo y
+     Unsplash, los dos enlazados y con los utm que ellos piden (los arma la
+     Edge Function). En la tarjeta va dibujada en el canvas, donde no se
+     puede pinchar; acá van los enlaces de verdad. */
+  function credito(cr) {
+    if (!cr || !cr.photographer) return '';
+    return '<p class="credit">Foto de ' +
+      '<a href="' + esc(cr.photographerUrl) + '" target="_blank" rel="noopener noreferrer">' +
+      esc(cr.photographer) + '</a> en ' +
+      '<a href="' + esc(cr.unsplashUrl) + '" target="_blank" rel="noopener noreferrer">Unsplash</a>' +
+      '</p>';
   }
 
   /* Cuántos mensajes tenía el chat la última vez que se pintó. */
@@ -632,6 +654,10 @@
           '</div>' +
           (GL.store.focusMuscles(w).length
             ? '<p class="musclist">' + esc(GL.store.focusMuscles(w).join(' · ')) + '</p>'
+            : '') +
+          (w.light
+            ? '<p class="musclist">' + icon(w.light === 'dia' ? 'sun' : 'moon') + ' ' +
+              esc(GL.store.lightLabel(w.light)) + '</p>'
             : '') +
           (w.notes ? '<p style="margin:14px 0 0;font-size:14px;color:var(--text-dim);border-left:1px solid var(--border-strong);padding-left:11px">' + esc(w.notes) + '</p>' : '')
           : '<p class="muted" style="margin:0 0 14px;font-size:14px">' +
@@ -1008,6 +1034,12 @@
       }).join('') + '</div>';
     }
 
+    var bl = S.byLight(ctx.workouts);
+    if (bl) {
+      html += sectionTitle('De día o de noche');
+      html += lightCard(bl);
+    }
+
     if (ins.length) {
       html += sectionTitle('Conclusiones');
       html += '<div class="card flush">' + ins.map(function (t, i) {
@@ -1043,6 +1075,39 @@
     html += '<div class="card"><div class="chart" id="ch-rolling"></div></div>';
 
     return { html: html, mount: mount };
+  }
+
+  /* Compara las sesiones de día contra las de noche. Es una comparación de
+     medias, no una prueba de nada: con pocas sesiones de un lado se avisa
+     para que nadie saque conclusiones de dos datos. */
+  function lightCard(bl) {
+    var filas = [
+      ['Sesiones', function (r) { return String(r.count); }],
+      ['Energía', function (r) { return r.energy == null ? NONE : fmtAvg(r.energy); }],
+      ['Sensación', function (r) { return r.feeling == null ? NONE : fmtAvg(r.feeling); }],
+      ['Dificultad', function (r) { return r.difficulty == null ? NONE : fmtAvg(r.difficulty); }],
+      ['Duración media', function (r) { return r.avgDuration == null ? NONE : S.formatDuration(r.avgDuration); }]
+    ];
+
+    var pocas = bl.dia.count < 4 || bl.noche.count < 4;
+
+    return '<div class="card">' +
+      '<div class="lightgrid">' +
+      '<span class="lg-h"></span>' +
+      '<span class="lg-h lg-dia">' + icon('sun') + 'Día</span>' +
+      '<span class="lg-h lg-noche">' + icon('moon') + 'Noche</span>' +
+      filas.map(function (f) {
+        var vd = f[1](bl.dia), vn = f[1](bl.noche);
+        return '<span class="lg-k">' + esc(f[0]) + '</span>' +
+          '<span class="lg-v">' + vd + '</span>' +
+          '<span class="lg-v">' + vn + '</span>';
+      }).join('') +
+      '</div>' +
+      '<p class="muted" style="margin:14px 0 0;font-size:12.5px;line-height:1.55">' +
+      (pocas
+        ? 'Todavía hay pocas sesiones de un lado como para comparar. Se etiquetan solas al registrar el día.'
+        : 'Comparación de medias sobre ' + bl.total + ' sesiones etiquetadas. La etiqueta sale del amanecer y el ocaso de tu ubicación.') +
+      '</p></div>';
   }
 
   function recordRow(ico, title, sub, value) {

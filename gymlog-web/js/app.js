@@ -66,6 +66,9 @@
         error: chatState.error
       },
       coach: settings.coach,
+      /* La atribución de la última foto de fondo usada, para poder
+         enseñarla con enlaces reales bajo el botón de compartir. */
+      credit: creditoFondo,
       coachState: coachState,
       coachMin: COACH_MIN_WORKOUTS,
       syncAge: settings.lastSync
@@ -239,7 +242,7 @@
     return {
       id: null, date: c.today, went: true, duration: t.duration,
       energy: t.energy, feeling: t.feeling, difficulty: t.difficulty,
-      type: null, focus: emptyFocus(), weight: null, notes: ''
+      type: null, focus: emptyFocus(), light: null, weight: null, notes: ''
     };
   }
 
@@ -252,6 +255,7 @@
       energy: existing.energy || 4, feeling: existing.feeling || 4, difficulty: existing.difficulty || 3,
       type: existing.type || null,
       focus: focusFrom(existing),
+      light: existing.light || null,
       weight: existing.weight, notes: existing.notes || ''
     } : Object.assign(blank(c), { date: date || c.today });
 
@@ -381,9 +385,10 @@
               energy: w.energy || 4, feeling: w.feeling || 4, difficulty: w.difficulty || 3,
               type: w.type || null,
               focus: focusFrom(w),
+              light: w.light || null,
               weight: w.weight, notes: w.notes || ''
             };
-          } else { f.id = null; f.date = date; f.type = null; f.focus = emptyFocus(); }
+          } else { f.id = null; f.date = date; f.type = null; f.light = null; f.focus = emptyFocus(); }
           $('.sheet-body').innerHTML = body();
           bind(); refreshExists();
         }
@@ -518,6 +523,9 @@
                opción y se conserva mientras no se marque nada nuevo. */
             type: f.type,
             focus: f.focus,
+            /* La etiqueta de día/noche se conserva al editar: la calculó el
+               momento del registro, no este formulario. */
+            light: f.light,
             weight: f.went && $('#f-w') ? $('#f-w').value : null,
             notes: $('#f-n').value
           });
@@ -535,6 +543,7 @@
     store.saveWorkout(payload).then(function (rec) {
       U.closeSheet();
       state.selected = rec.date;
+      etiquetarLuz(rec);
       state.month = S.monthKey(rec.date);
       render();
 
@@ -611,7 +620,7 @@
           store.saveWorkout({
             id: null, date: copy.date, went: copy.went, duration: copy.duration,
             energy: copy.energy, feeling: copy.feeling, difficulty: copy.difficulty,
-            type: copy.type, focus: copy.focus,
+            type: copy.type, focus: copy.focus, light: copy.light,
             weight: copy.weight, notes: copy.notes, demo: copy.demo
           }).then(function () { render(); U.toast('Recuperada', 'ok'); });
         }
@@ -1181,6 +1190,137 @@
     });
   }
 
+  /* ------------------------------------------------ de día o de noche
+     La ubicación se pide UNA vez y se guarda en los ajustes, junto con el
+     hecho de haberla pedido: si la persona dice que no, se anota el respaldo
+     (Bogotá) y no se la vuelve a molestar con el diálogo del navegador.
+
+     La llamada a api.sunrise-sunset.org va directa desde acá: es pública y
+     sin clave, así que hacerla pasar por una Edge Function sería dar un
+     rodeo para nada. */
+  function ensureGeo() {
+    var g = store.settings().geo;
+    if (g) return Promise.resolve(g);
+
+    return GL.sun.locate().then(function (loc) {
+      var guardado = {
+        lat: loc.lat, lng: loc.lng,
+        source: loc.source,
+        at: new Date().toISOString()
+      };
+      /* rawStore: es contabilidad interna, no un cambio que haya hecho la
+         persona, y así no dispara una subida por sí sola. */
+      return rawStore.saveSettings({ geo: guardado }).then(function () { return guardado; });
+    });
+  }
+
+  /* Solo se etiqueta lo que se registra en el día: para una sesión que se
+     rellena tres días después, la hora del formulario es la de ahora y no la
+     del entrenamiento. Inventar una etiqueta ahí sería ensuciar los datos
+     con los que después se sacan conclusiones. */
+  function etiquetarLuz(rec) {
+    if (!rec || !rec.went || rec.light) return;
+    if (rec.date !== S.today()) return;
+
+    ensureGeo()
+      .then(function (g) { return GL.sun.classify(new Date(), g.lat, g.lng); })
+      .then(function (luz) {
+        if (!luz) return;
+        /* store, no rawStore: la etiqueta es un dato de la sesión y tiene
+           que llegar a la nube. Si la API contesta rápido, la subida que ya
+           estaba programada (1,5 s) se la lleva y no hay una segunda. */
+        return store.saveWorkout(Object.assign({}, rec, { light: luz }))
+          .then(function () { render(); });
+      })
+      ['catch'](function () { /* sin conexión o sin permiso: se queda sin etiqueta */ });
+  }
+
+  /* ------------------------------------------------------- unsplash
+     Una foto por categoría y por día. Unsplash da 50 solicitudes por hora en
+     el plan gratis, y generar la tarjeta cinco veces seguidas no debería
+     gastar cinco. Vive en localStorage y no en los ajustes a propósito: es
+     caché, no un dato de la persona, y no tiene por qué viajar a la nube en
+     cada respaldo. */
+  var UNSPLASH_KEY = 'gymlog:unsplash';
+
+  function fondoCacheado(categoria) {
+    try {
+      var todo = JSON.parse(localStorage.getItem(UNSPLASH_KEY) || '{}');
+      var e = todo[categoria];
+      return (e && e.at === S.today() && e.imageUrl) ? e : null;
+    } catch (err) { return null; }
+  }
+
+  function guardarFondo(categoria, data) {
+    try {
+      var todo = JSON.parse(localStorage.getItem(UNSPLASH_KEY) || '{}');
+      todo[categoria] = {
+        at: S.today(),
+        imageUrl: data.imageUrl,
+        photographer: data.photographer,
+        photographerUrl: data.photographerUrl,
+        unsplashUrl: data.unsplashUrl
+      };
+      localStorage.setItem(UNSPLASH_KEY, JSON.stringify(todo));
+    } catch (err) { /* sin caché se sigue igual, solo se gasta más cuota */ }
+  }
+
+  function olvidarFondo(categoria) {
+    try {
+      var todo = JSON.parse(localStorage.getItem(UNSPLASH_KEY) || '{}');
+      delete todo[categoria];
+      localStorage.setItem(UNSPLASH_KEY, JSON.stringify(todo));
+    } catch (err) { }
+  }
+
+  /* La categoría del entrenamiento más reciente: es lo que da el tema de la
+     foto. Si no hay ninguna marcada, 'otro' trae algo genérico de gimnasio. */
+  function categoriaDeFondo(c) {
+    var w = S.done(c.workouts)[0];
+    var f = w && w.focus;
+    if (f && f.groups && f.groups.length) return f.groups[0];
+    if (w && w.type) return w.type;
+    return 'otro';
+  }
+
+  /* Devuelve la foto o null. NUNCA rechaza: la tarjeta tiene que salir
+     igual, con su fondo de siempre, si esto no funciona. */
+  function traerFondo(categoria) {
+    var cache = fondoCacheado(categoria);
+    if (cache) return Promise.resolve(cache);
+    if (!cloudUser || !GL.cloud.unsplash) return Promise.resolve(null);
+
+    return GL.cloud.unsplash(categoria)
+      .then(function (d) {
+        guardarFondo(categoria, d);
+        return d;
+      })
+      ['catch'](function (err) {
+        if (window.console) console.warn('unsplash:', err && err.message);
+        return null;
+      });
+  }
+
+  /* Carga la imagen para el canvas. crossOrigin es imprescindible: sin él el
+     canvas queda «manchado» y toBlob() lanza SecurityError. Unsplash sirve
+     sus imágenes con Access-Control-Allow-Origin: *, así que funciona. */
+  function cargarImagen(url) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      var listo = false;
+      var fin = function (v) { if (!listo) { listo = true; resolve(v); } };
+      img.crossOrigin = 'anonymous';
+      img.onload = function () { fin(img); };
+      img.onerror = function () { fin(null); };
+      setTimeout(function () { fin(null); }, 9000);
+      img.src = url;
+    });
+  }
+
+  /* La última atribución usada, para poder enseñarla con enlaces de verdad
+     debajo del botón (en el canvas el texto no se puede pinchar). */
+  var creditoFondo = null;
+
   /* --------------------------------------------------------------- chat
      La charla se guarda en los ajustes, que ya viajan a la cuenta en cada
      sincronización: sigue donde se dejó al abrir en otro dispositivo, y como
@@ -1561,6 +1701,33 @@
      marcas personales. Nada nuevo que mantener, solo otra forma de verlos. */
   function shareCard() {
     var c = ctx();
+    var categoria = categoriaDeFondo(c);
+
+    U.toast('Preparando la tarjeta…');
+    /* La foto es un adorno: si tarda o falla, la tarjeta sale igual con el
+       fondo de rayas de siempre. Por eso traerFondo() nunca rechaza. */
+    traerFondo(categoria)
+      .then(function (fondo) {
+        if (!fondo) return null;
+        return cargarImagen(fondo.imageUrl).then(function (img) {
+          /* Si la imagen no carga, se tira esa entrada del caché: guardada
+             estaría fallando el resto del día sin volver a intentarlo. */
+          if (!img) { olvidarFondo(categoria); return null; }
+          return { img: img, credito: fondo };
+        });
+      })
+      .then(function (arte) {
+        var antes = creditoFondo;
+        creditoFondo = arte ? arte.credito : null;
+        dibujarTarjeta(c, arte);
+        /* Se repinta también cuando la foto FALLA: si no, la atribución de
+           la vez anterior seguiría en pantalla acreditando a alguien cuya
+           foto no está en la tarjeta que se acaba de generar. */
+        if (antes !== creditoFondo) render();
+      });
+  }
+
+  function dibujarTarjeta(c, arte) {
     var g = c.settings.gymDays;
     var o = S.overall(c.workouts, g, c.today, c.start, c.win);
     var st = S.streaks(c.workouts, g, c.today, c.start, c.win);
@@ -1581,15 +1748,39 @@
     };
 
     x.fillStyle = bg; x.fillRect(0, 0, W, H);
-    x.strokeStyle = line; x.lineWidth = 2;
-    for (var i = -H; i < W; i += 46) {
-      x.beginPath(); x.moveTo(i, H); x.lineTo(i + H * 0.45, 0); x.stroke();
+
+    if (arte) {
+      /* La foto viene ya recortada a 1080x1350 desde la función, así que
+         entra tal cual. Encima va un velo oscuro y un degradado: sin eso,
+         una foto clara se come el texto blanco. */
+      x.drawImage(arte.img, 0, 0, W, H);
+
+      x.fillStyle = 'rgba(6,8,12,0.68)';
+      x.fillRect(0, 0, W, H);
+
+      var grad = x.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, 'rgba(6,8,12,0.55)');
+      grad.addColorStop(0.45, 'rgba(6,8,12,0.20)');
+      grad.addColorStop(1, 'rgba(6,8,12,0.90)');
+      x.fillStyle = grad;
+      x.fillRect(0, 0, W, H);
+
+      /* Un texto claro sobre foto necesita sombra para leerse siempre. */
+      x.shadowColor = 'rgba(0,0,0,0.65)';
+      x.shadowBlur = 18;
+      x.shadowOffsetY = 2;
+    } else {
+      /* Sin foto, las rayas diagonales de siempre. */
+      x.strokeStyle = line; x.lineWidth = 2;
+      for (var i = -H; i < W; i += 46) {
+        x.beginPath(); x.moveTo(i, H); x.lineTo(i + H * 0.45, 0); x.stroke();
+      }
     }
 
     x.fillStyle = accent; x.fillRect(80, 140, 120, 10);
     x.fillStyle = fg; x.font = F(96, 800);
     x.fillText('MI PROGRESO', 80, 268);
-    x.fillStyle = muted; x.font = F(36, 600);
+    x.fillStyle = arte ? '#C9D0DC' : muted; x.font = F(36, 600);
     x.fillText(
       (c.eff ? 'DESDE EL ' + S.formatShort(c.eff).toUpperCase() : '') + '   ·   ' +
       S.formatShort(c.today).toUpperCase(), 80, 320);
@@ -1605,15 +1796,19 @@
     big.forEach(function (r, n) {
       var cx = bx + (n % 2) * ((W - 160) / 2);
       var cy = by + Math.floor(n / 2) * 260;
-      x.fillStyle = muted; x.font = F(34, 700);
+      x.fillStyle = arte ? '#C9D0DC' : muted; x.font = F(34, 700);
       x.fillText(r[0].toUpperCase(), cx, cy);
       x.fillStyle = (n === 0) ? accent : fg;
       x.font = F(130, 800);
       x.fillText(r[1], cx, cy + 128);
     });
 
-    x.strokeStyle = line; x.lineWidth = 2;
+    x.save();
+    x.shadowColor = 'transparent';
+    x.strokeStyle = arte ? 'rgba(255,255,255,0.22)' : line;
+    x.lineWidth = 2;
     x.beginPath(); x.moveTo(80, 960); x.lineTo(W - 80, 960); x.stroke();
+    x.restore();
 
     /* marcas personales, en línea */
     var marcas = [];
@@ -1625,7 +1820,7 @@
 
     var my = 1035;
     marcas.slice(0, 3).forEach(function (r) {
-      x.fillStyle = muted; x.font = F(34, 700);
+      x.fillStyle = arte ? '#C9D0DC' : muted; x.font = F(34, 700);
       x.fillText(r[0].toUpperCase(), 80, my);
       x.fillStyle = fg; x.font = F(46, 700);
       var w = x.measureText(r[1]).width;
@@ -1636,14 +1831,33 @@
     x.fillStyle = accent; x.font = F(44, 800);
     x.fillText('GYMLOG', 80, H - 90);
     var nombre = (c.settings.name || '').toUpperCase();
-    x.fillStyle = muted; x.font = F(34, 600);
+    x.fillStyle = arte ? '#C9D0DC' : muted; x.font = F(34, 600);
     x.fillText(nombre, W - 80 - x.measureText(nombre).width, H - 90);
 
+    /* ------------------------------------------------------ atribución
+       Obligatoria por los términos de Unsplash. En el canvas no se puede
+       pinchar, así que va en texto pequeño y discreto abajo del todo; los
+       enlaces de verdad se muestran en la pantalla, bajo el botón. */
+    if (arte) {
+      x.shadowColor = 'rgba(0,0,0,0.8)';
+      x.shadowBlur = 10;
+      x.shadowOffsetY = 1;
+      x.fillStyle = 'rgba(220,226,236,0.62)';
+      x.font = '500 24px -apple-system, Barlow, Arial, sans-serif';
+      x.fillText('Foto de ' + arte.credito.photographer + ' en Unsplash', 80, H - 42);
+    }
+
+    /* Con foto de fondo, JPEG: en PNG la misma tarjeta pesa más de 2 MB y
+       eso es mucho para compartir por mensajería. Sin foto son planos y
+       rayas, donde PNG pesa menos y no pierde nitidez. */
+    var tipo = arte ? 'image/jpeg' : 'image/png';
+    var ext = arte ? 'jpg' : 'png';
     cv.toBlob(function (blob) {
       if (!blob) { U.toast('No se pudo generar la imagen', 'error'); return; }
-      deliverFile('gymlog-progreso-' + S.today() + '.png', blob, 'image/png');
-    }, 'image/png');
+      deliverFile('gymlog-progreso-' + S.today() + '.' + ext, blob, tipo);
+    }, tipo, 0.92);
   }
+
 
   /* --------------------------------------------------------- demo / wipe */
   function seedDemo() {

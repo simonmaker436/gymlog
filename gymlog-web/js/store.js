@@ -184,6 +184,12 @@
        { date: 'YYYY-MM-DD', recomendacion, consejo } */
     coach: null,
 
+    /* Ubicación aproximada para saber si una sesión fue de día o de noche.
+       Se pide UNA vez y se guarda; un rechazo también se guarda (source
+       'fallback'), para no volver a molestar con el diálogo del navegador.
+       { lat, lng, source: 'device' | 'fallback', at } */
+    geo: null,
+
     /* La conversación con el entrenador. Vive en settings a propósito: así
        viaja a la cuenta con el resto del respaldo (tabla `backups`, con RLS
        por auth.uid()) y la charla sigue en el otro dispositivo, sin montar
@@ -347,6 +353,17 @@
 
   /* Opcional a propósito: null es un valor válido y significa «sin etiqueta».
      Cualquier cosa que no esté en la lista se descarta. */
+  /* 'dia' | 'noche' | null. Lo calcula sun.js contra el amanecer y el ocaso
+     del día en que se entrenó; null significa «no se pudo saber», que es un
+     valor válido y no rompe nada. */
+  function normalizeLight(v) {
+    return (v === 'dia' || v === 'noche') ? v : null;
+  }
+
+  function lightLabel(key) {
+    return key === 'dia' ? 'De día' : key === 'noche' ? 'De noche' : null;
+  }
+
   /* Solo para lo que ya estaba guardado; el formulario nuevo no lo escribe. */
   function normalizeType(v) {
     if (v === '' || v === null || v === undefined) return null;
@@ -420,6 +437,21 @@
         recomendacion: (co.recomendacion || '').toString().slice(0, 600),
         consejo: (co.consejo || '').toString().slice(0, 600)
       } : null;
+    }
+
+    /* La ubicación viaja en el respaldo y puede venir de un archivo editado
+       a mano: se aceptan solo coordenadas con sentido. */
+    if (out.geo) {
+      var g0 = out.geo;
+      var la = Number(g0 && g0.lat), ln = Number(g0 && g0.lng);
+      out.geo = (isFinite(la) && isFinite(ln) && Math.abs(la) <= 90 && Math.abs(ln) <= 180)
+        ? {
+          lat: Math.round(la * 1000) / 1000,
+          lng: Math.round(ln * 1000) / 1000,
+          source: g0.source === 'device' ? 'device' : 'fallback',
+          at: typeof g0.at === 'string' ? g0.at : null
+        }
+        : null;
     }
 
     /* La charla llega del respaldo, que puede venir de una versión vieja o
@@ -625,6 +657,7 @@
         // sin ir al gimnasio no hay tipo de entreno que valga
         type: data.went ? normalizeType(data.type) : null,
         focus: data.went ? normalizeFocus(data.focus) : null,
+        light: data.went ? normalizeLight(data.light) : null,
         weight: (data.weight === '' || data.weight === null || data.weight === undefined || isNaN(Number(data.weight)))
           ? null : Number(data.weight),
         notes: (data.notes || '').trim(),
@@ -842,6 +875,7 @@
                vieja de una sola opción; `focus`, la selección por músculos. */
             type: normalizeType(w.type),
             focus: normalizeFocus(w.focus),
+            light: normalizeLight(w.light),
             weight: (w.weight == null || isNaN(Number(w.weight))) ? null : Number(w.weight),
             notes: (w.notes || '').toString(),
             demo: !!w.demo,
@@ -912,6 +946,7 @@
     CHAT_MAX: CHAT_MAX,
     workoutTypeLabel: workoutTypeLabel,
     focusLabel: focusLabel,
+    lightLabel: lightLabel,
     focusMuscles: focusMuscles,
     normalizeFocus: normalizeFocus,
     groupLabel: groupLabel,
