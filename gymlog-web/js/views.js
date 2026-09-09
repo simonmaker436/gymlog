@@ -13,6 +13,21 @@
   var NONE = '<span class="none">sin datos</span>';
 
   /* El tipo de entreno es opcional: sin etiqueta se dice, no se inventa. */
+  /* Qué decir de un día en el que no se fue. Con motivo guardado se nombra
+     y se aclara qué pasó con la racha, que es lo que la persona quiere
+     saber; sin motivo, el texto de siempre. */
+  function excuseLine(w) {
+    var etiqueta = GL.excuses.label(w);
+    if (!etiqueta) {
+      return w.notes ? esc(w.notes) : 'Marcaste que no fuiste.';
+    }
+    return '<b>' + esc(etiqueta) + '</b>' +
+      (GL.excuses.isJustified(w)
+        ? ' · falta justificada, la racha no se cortó.'
+        : ' · la racha se cortó acá.') +
+      (w.notes ? '<br>' + esc(w.notes) : '');
+  }
+
   /* «De noche · 21:30». La hora solo se muestra si la escribió la persona;
      si no, la etiqueta sola ya dice lo que hay que saber. */
   function lightText(w) {
@@ -71,7 +86,10 @@
       '<b>Hoy toca gimnasio</b>' +
       '<small>Son las ' + String(ctx.hour).padStart(2, '0') + ':00 y todavía no registraste nada.</small>' +
       '</div>' +
+      '<div class="remind-b">' +
       '<button class="btn sm primary" data-act="log" data-date="' + ctx.today + '">Registrar</button>' +
+      '<button class="btn sm ghost" data-act="excuse" data-date="' + ctx.today + '">No pude ir</button>' +
+      '</div>' +
       '</div>';
   }
 
@@ -350,6 +368,11 @@
       (w.demo ? '<span class="pill demo">ejemplo</span>' : '') +
       '</div>' +
       '<h3>' + (w.went ? 'Sesión completada' : 'No fui') + '</h3>' +
+      (!w.went && GL.excuses.label(w)
+        ? '<span class="pill excuse' + (GL.excuses.isJustified(w) ? ' ok' : '') + '">' +
+          icon(GL.excuses.isJustified(w) ? 'shield' : 'flame') +
+          esc(GL.excuses.label(w)) + '</span>'
+        : '') +
       (w.went && (GL.store.focusLabel(w) || w.light)
         ? (GL.store.focusLabel(w)
             ? '<span class="pill type">' + esc(GL.store.focusLabel(w)) + '</span>'
@@ -706,12 +729,19 @@
             (daysLeft(sel, ctx) === 1 ? 'queda 1 día' : 'quedan ' + daysLeft(sel, ctx) + ' días') + ' para rellenarlo.'
             : status === 'missed' && !w ? 'Era un día programado y el plazo para registrarlo ya pasó.'
               : status === 'pending' ? 'Día programado, todavía sin registrar.'
-                : status === 'missed' && w ? (w.notes ? esc(w.notes) : 'Marcaste que no fuiste.')
+                : status === 'missed' && w ? excuseLine(w)
                   : 'No es uno de tus días de gimnasio.') + '</p>') +
         (w || S.canLog(sel, ctx.today, ctx.win)
           ? '<div class="btn-row" style="margin-top:14px">' +
           '<button class="btn ' + (status === 'open' ? 'primary' : 'ghost') + ' sm" data-act="log" data-date="' + sel + '">' +
           (w ? icon('edit') + 'Editar' : icon('plus') + 'Registrar') + '</button>' +
+          /* Solo en días programados: en un día suelto no hay nada a lo que
+             faltar, y ofrecerlo ahí solo confunde. */
+          (S.isScheduled(sel, g) && (!w || !w.went)
+            ? '<button class="btn ghost sm" data-act="excuse" data-date="' + sel + '">' +
+              icon(w && w.excuse ? 'edit' : 'note') +
+              (w && w.excuse ? 'Cambiar motivo' : 'No fui') + '</button>'
+            : '') +
           (w ? '<button class="btn danger sm" data-act="delete" data-id="' + esc(w.id) + '">' + icon('trash') + 'Eliminar</button>' : '') +
           '</div>'
           : '<p class="muted" style="margin:14px 0 0;font-size:12.5px;display:flex;gap:8px;align-items:center">' +

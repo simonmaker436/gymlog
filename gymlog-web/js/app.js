@@ -1206,6 +1206,82 @@
     });
   }
 
+  /* ------------------------------------------------ faltar a un día
+     Cuando un día programado se queda sin registrar, en vez de dejarlo como
+     una falta a secas se pregunta el motivo. La respuesta decide si la racha
+     sigue viva y qué frase se muestra; las dos cosas viven en excuses.js.
+
+     Tres pasos, cada uno una hoja: sí/no → motivo → frase. Separados a
+     propósito: meter seis motivos de golpe obliga a leer y comparar, y la
+     primera pregunta ya es la que decide lo importante. */
+  function excuseStep1(date) {
+    U.openSheet({
+      title: 'No fuiste el ' + S.formatShort(date),
+      body: '<p class="sheet-lead">¿Hay una excusa justificada?</p>' +
+        '<p class="muted" style="margin:0 0 16px;font-size:13px;line-height:1.55">' +
+        'Si la hay, tu racha sigue viva. Si no, vuelve a cero.</p>' +
+        '<div class="optiongrid">' +
+        '<button data-act="excuse-branch" data-date="' + date + '" data-just="1">Sí</button>' +
+        '<button data-act="excuse-branch" data-date="' + date + '" data-just="0">No</button>' +
+        '</div>'
+    });
+  }
+
+  function excuseStep2(date, justified) {
+    var opciones = GL.excuses.forBranch(justified);
+    U.openSheet({
+      title: justified ? '¿Qué pasó?' : '¿Qué te frenó?',
+      body: '<p class="muted" style="margin:0 0 16px;font-size:13px;line-height:1.55">' +
+        (justified
+          ? 'Se guarda como falta justificada: no rompe la racha.'
+          : 'Se guarda como falta sin justificar: la racha vuelve a cero.') +
+        '</p>' +
+        '<div class="optiongrid">' +
+        opciones.map(function (r) {
+          return '<button data-act="excuse-pick" data-date="' + date +
+            '" data-reason="' + r.key + '">' + esc(r.label) + '</button>';
+        }).join('') +
+        '</div>' +
+        '<div class="btn-row" style="margin-top:14px">' +
+        '<button class="btn ghost sm" data-act="excuse" data-date="' + date + '">' +
+        icon('left') + 'Volver</button></div>'
+    });
+  }
+
+  function excuseStep3(date, reason) {
+    var r = GL.excuses.byKey(reason);
+    var frase = GL.excuses.phraseFor(reason, date);
+    U.openSheet({
+      title: r.justified ? 'Falta justificada' : 'Falta registrada',
+      body: '<div class="excuse-done' + (r.justified ? ' is-ok' : '') + '">' +
+        '<span class="excuse-ic">' + icon(r.justified ? 'shield' : 'flame') + '</span>' +
+        '<p class="excuse-say">' + esc(frase) + '</p>' +
+        '<p class="excuse-meta">' + esc(r.label) + ' · ' +
+        (r.justified ? 'tu racha sigue en pie' : 'la racha vuelve a cero') + '</p>' +
+        '</div>',
+      footer: '<button class="btn primary block" data-sheet-close>Listo</button>'
+    });
+  }
+
+  function saveExcuse(date, reason) {
+    var existente = store.workoutByDate(date);
+    return store.saveWorkout({
+      id: existente ? existente.id : null,
+      date: date,
+      went: false,
+      excuse: { reason: reason },
+      /* Si ya había una nota escrita en ese día no se pisa. */
+      notes: existente ? (existente.notes || '') : ''
+    }).then(function () {
+      state.selected = date;
+      render();
+      excuseStep3(date, reason);
+    })['catch'](function (err) {
+      U.closeSheet();
+      U.toast(err.message || 'No se pudo guardar', 'error');
+    });
+  }
+
   /* -------------------------------------------- notificaciones push
      Todo lo del SDK vive en js/push.js; acá solo está el estado que se pinta
      y el guardado del id de suscripción en la cuenta.
@@ -2101,6 +2177,9 @@
       case 'theme':
         store.saveSettings({ theme: arg('theme') }).then(function (s) { applyTheme(s.theme); render(); });
         break;
+      case 'excuse': excuseStep1(arg('date')); break;
+      case 'excuse-branch': excuseStep2(arg('date'), arg('just') === '1'); break;
+      case 'excuse-pick': saveExcuse(arg('date'), arg('reason')); break;
       case 'toggle-push': togglePush(); break;
       case 'toggle-reminders':
         store.saveSettings({ reminders: !store.settings().reminders }).then(function () { render(); });

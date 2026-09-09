@@ -671,6 +671,10 @@
         focus: data.went ? normalizeFocus(data.focus) : null,
         time: data.went ? normalizeTime(data.time) : null,
         light: data.went ? normalizeLight(data.light) : null,
+        /* Solo tiene sentido cuando NO se fue: es el motivo de la falta.
+           La lista de motivos vive en excuses.js, que es el único sitio
+           donde hay que tocarla. */
+        excuse: data.went ? null : (GL.excuses ? GL.excuses.normalize(data.excuse) : null),
         weight: (data.weight === '' || data.weight === null || data.weight === undefined || isNaN(Number(data.weight)))
           ? null : Number(data.weight),
         notes: (data.notes || '').trim(),
@@ -890,6 +894,7 @@
             focus: normalizeFocus(w.focus),
             time: normalizeTime(w.time),
             light: normalizeLight(w.light),
+            excuse: w.went ? null : (GL.excuses ? GL.excuses.normalize(w.excuse) : null),
             weight: (w.weight == null || isNaN(Number(w.weight))) ? null : Number(w.weight),
             notes: (w.notes || '').toString(),
             demo: !!w.demo,

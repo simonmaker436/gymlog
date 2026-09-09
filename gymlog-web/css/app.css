@@ -1329,6 +1329,67 @@ main {
 .lightgrid .lg-v small { font-size: 12px; color: var(--text-muted); }
 .lightgrid > *:nth-last-child(-n+3) { border-bottom: 0; }
 
+/* ------------------------------------------------ motivo de una falta */
+.pill.excuse {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 8px;
+  text-transform: none;
+  letter-spacing: .02em;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--miss);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--miss) 40%, transparent);
+}
+.pill.excuse.ok {
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 40%, transparent);
+}
+.pill.excuse .ic { width: 12px; height: 12px; }
+
+/* Los dos botones del aviso de Inicio, que ahora son dos y no uno. */
+.remind-b { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* La frase de cierre, después de elegir el motivo. */
+.sheet-lead {
+  margin: 0 0 6px;
+  font-family: var(--font-cond);
+  font-size: 21px; font-weight: 700;
+  letter-spacing: .01em;
+  color: var(--text);
+}
+.excuse-done {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 12px;
+  padding: 20px 8px 6px;
+  text-align: center;
+}
+.excuse-ic {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  color: var(--miss);
+  background: color-mix(in srgb, var(--miss) 12%, transparent);
+}
+.excuse-done.is-ok .excuse-ic {
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 12%, transparent);
+}
+.excuse-ic .ic { width: 25px; height: 25px; }
+.excuse-say {
+  margin: 0;
+  max-width: 30ch;
+  font-size: 16px; line-height: 1.55;
+  color: var(--text);
+}
+.excuse-meta {
+  margin: 0;
+  font-family: var(--font-cond);
+  font-size: 11.5px; font-weight: 700;
+  letter-spacing: .11em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 /* El subtexto de una fila cuando algo falló. */
 .row .t small.row-err { color: var(--miss); }
 .row[disabled] { opacity: .55; }

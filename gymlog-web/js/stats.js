@@ -187,10 +187,26 @@
       return st === 'pending' || st === 'open';
     };
 
+    /* Una falta justificada (salud, un evento, un imprevisto) se trata igual
+       que un día sin resolver: no suma sesión, pero tampoco corta. Es
+       exactamente lo que se le promete a la persona cuando elige «sí, hay
+       una excusa justificada».
+
+       Ojo: NO suma. Justificar una falta mantiene viva la racha, no la hace
+       crecer; si sumara, faltar rendiría lo mismo que ir. */
+    var excused = function (d) {
+      var w = map[d];
+      /* La comprobación va escrita acá y no delegada en excuses.js a
+         propósito: stats.js es un módulo puro, sin dependencias globales, y
+         corre también fuera del navegador. Lo único que necesita es el
+         booleano que ya viene guardado en el registro. */
+      return !!(w && w.went === false && w.excuse && w.excuse.justified === true);
+    };
+
     var run = 0, runStart = null;
     for (var i = days.length - 1; i >= 0; i--) {
       var d = days[i];
-      if (unresolved(d)) continue;
+      if (unresolved(d) || excused(d)) continue;
       var w = map[d];
       if (w && w.went) { run++; runStart = d; } else break;
     }
@@ -207,7 +223,7 @@
         acc++;
         if (acc > best) { best = acc; res.bestStart = accStart; res.bestEnd = dd; }
       }
-      else if (unresolved(dd)) { /* sin resolver: no rompe */ }
+      else if (unresolved(dd) || excused(dd)) { /* no rompe */ }
       else { acc = 0; accStart = null; }
     }
     res.best = Math.max(best, res.current);
