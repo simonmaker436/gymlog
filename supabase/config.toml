@@ -11,3 +11,12 @@ enabled = true
 # contra /auth/v1/user para sacar el id de usuario, que es lo que aísla las
 # fotos: nunca se confía en un id que venga en el cuerpo.
 enabled = true
+
+[functions.send-reminders]
+# verify_jwt en false a propósito: la llama el cron de la base de datos, no
+# un usuario con sesión, así que no hay ningún JWT que verificar. El portero
+# es el token compartido de la cabecera x-reminder-token (secreto
+# REMINDER_TOKEN), que es lo que impide que cualquiera con la URL dispare
+# envíos y gaste la cuota de OneSignal.
+enabled = true
+verify_jwt = false

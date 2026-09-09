@@ -1329,6 +1329,10 @@ main {
 .lightgrid .lg-v small { font-size: 12px; color: var(--text-muted); }
 .lightgrid > *:nth-last-child(-n+3) { border-bottom: 0; }
 
+/* El subtexto de una fila cuando algo falló. */
+.row .t small.row-err { color: var(--miss); }
+.row[disabled] { opacity: .55; }
+
 /* ------------------------------- atribución obligatoria de Unsplash */
 .credit {
   margin: 12px 0 0;

@@ -57,6 +57,10 @@
   function reminderBanner(ctx) {
     var s = ctx.settings;
     if (!s.reminders) return '';
+    /* Con las notificaciones del sistema activas este banner sobra: el aviso
+       ya llegó al teléfono. Se mantiene para quien no las activó, que si no
+       se quedaría sin recordatorio de ningún tipo. */
+    if (ctx.pushState && ctx.pushState.activo) return '';
     if (!S.isScheduled(ctx.today, s.gymDays)) return '';
     if (ctx.byDate[ctx.today]) return '';               // ya hay registro de hoy
     if (ctx.hour < s.reminderHour) return '';
@@ -515,6 +519,35 @@
           icon('trash') + 'Borrar la charla</button></div>'
         : '') +
       '</div>';
+  }
+
+  /* Interruptor de las notificaciones del sistema. Se separa del de
+     «Recordatorios» a propósito: aquel es un aviso dentro de la app, este
+     llega con GymLog cerrada y necesita permiso del navegador. */
+  function pushRow(ctx) {
+    var p = ctx.pushState || {};
+
+    if (!p.soportado) {
+      return '<div class="row"><div class="t"><b>Recibir recordatorios por notificación</b>' +
+        '<small>' + esc(p.motivo || 'Este navegador no admite notificaciones.') +
+        '</small></div></div>';
+    }
+
+    var sub = '';
+    if (p.busy) sub = 'Un momento…';
+    else if (p.error) sub = p.error;
+    else if (p.activo) sub = 'Te avisamos aunque tengas la app cerrada.';
+    else if (p.permiso === 'denied') {
+      sub = 'El navegador tiene las notificaciones bloqueadas para este sitio. ' +
+        'Hay que permitirlas desde sus ajustes.';
+    } else sub = 'Un aviso los días que toca y no registraste, con la app cerrada.';
+
+    return '<button class="row" data-act="toggle-push"' +
+      (p.busy || p.permiso === 'denied' ? ' disabled' : '') + '>' +
+      '<div class="t"><b>Recibir recordatorios por notificación</b>' +
+      '<small' + (p.error ? ' class="row-err"' : '') + '>' + esc(sub) + '</small></div>' +
+      '<span class="switch' + (p.activo ? ' on' : '') + '" role="switch" aria-checked="' +
+      !!p.activo + '"></span></button>';
   }
 
   /* La atribución que exigen los términos de Unsplash: el fotógrafo y
@@ -1391,6 +1424,7 @@
       '<button class="row" data-act="toggle-reminders"><div class="t"><b>Recordatorios</b>' +
       '<small>Aviso en Inicio los días que toca gimnasio.</small></div>' +
       '<span class="switch' + (s.reminders ? ' on' : '') + '" role="switch" aria-checked="' + !!s.reminders + '"></span></button>' +
+      pushRow(ctx) +
       (s.reminders
         ? '<div class="row" style="flex-direction:column;align-items:stretch;gap:8px">' +
         '<div class="field" style="gap:6px"><label for="set-rhour">Avisar a partir de las</label>' +

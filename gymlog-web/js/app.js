@@ -69,6 +69,7 @@
       /* La atribución de la última foto de fondo usada, para poder
          enseñarla con enlaces reales bajo el botón de compartir. */
       credit: creditoFondo,
+      pushState: pushState,
       coachState: coachState,
       coachMin: COACH_MIN_WORKOUTS,
       syncAge: settings.lastSync
@@ -103,6 +104,9 @@
     state.view = view;
     render();
     window.scrollTo({ top: 0 });
+    /* Mirar en qué estado están las notificaciones no pide permiso ni
+       muestra ningún diálogo: solo consulta. */
+    if (view === 'settings') refreshPush();
     /* El entrenador muestra el cupo semanal y lo que opinó de las fotos: se
        piden al entrar, no al arrancar la app. */
     if (view === 'coach') loadPhotos(false);
@@ -1202,6 +1206,79 @@
     });
   }
 
+  /* -------------------------------------------- notificaciones push
+     Todo lo del SDK vive en js/push.js; acá solo está el estado que se pinta
+     y el guardado del id de suscripción en la cuenta.
+
+     El permiso NO se pide al arrancar: solo cuando se toca el interruptor de
+     Ajustes. Lo que sí se hace al abrir Ajustes es mirar en qué estado está,
+     que no pide nada ni molesta. */
+  var pushState = {
+    soportado: GL.push ? GL.push.disponible() : false,
+    motivo: null,
+    permiso: 'default',
+    activo: false,
+    busy: false,
+    error: null,
+    mirado: false
+  };
+
+  if (!pushState.soportado) {
+    pushState.motivo = (window.isSecureContext !== true)
+      ? 'Las notificaciones necesitan una conexión segura (https).'
+      : 'Este navegador no admite notificaciones.';
+  }
+
+  /* Se consulta una vez, al entrar en Ajustes. */
+  function refreshPush() {
+    if (!pushState.soportado || pushState.mirado || pushState.busy) return;
+    pushState.mirado = true;
+    GL.push.estado().then(function (e) {
+      pushState.permiso = e.permiso;
+      pushState.activo = !!(e.id && e.permiso === 'granted');
+      if (!e.soportado) {
+        pushState.soportado = false;
+        pushState.motivo = e.motivo || 'Este navegador no admite notificaciones.';
+      }
+      render();
+    })['catch'](function () { });
+  }
+
+  function togglePush() {
+    if (!pushState.soportado || pushState.busy) return;
+    if (!cloudUser) { U.toast('Iniciá sesión primero', 'error'); return; }
+
+    pushState.busy = true;
+    pushState.error = null;
+    render();
+
+    var apagar = pushState.activo;
+    var paso = apagar
+      ? GL.push.desactivar()
+        .then(function () { return GL.cloud.deletePushSubscription(); })
+        .then(function () { pushState.activo = false; })
+      : GL.push.activar()
+        .then(function (id) { return GL.cloud.savePushSubscription(id); })
+        .then(function () { pushState.activo = true; });
+
+    paso.then(function () {
+      pushState.busy = false;
+      if (typeof Notification !== 'undefined') pushState.permiso = Notification.permission;
+      render();
+      U.toast(apagar ? 'Notificaciones desactivadas' : 'Listo, te vamos a avisar', apagar ? null : 'ok');
+    })['catch'](function (err) {
+      pushState.busy = false;
+      if (typeof Notification !== 'undefined') pushState.permiso = Notification.permission;
+      var m = (err && err.message) || '';
+      pushState.error = m === 'permiso-denegado'
+        ? 'No diste permiso. Se puede cambiar desde los ajustes del navegador.'
+        : m === 'sin-id'
+          ? 'El navegador no terminó de registrar el aviso. Probá de nuevo.'
+          : (m || 'No se pudo activar.');
+      render();
+    });
+  }
+
   /* ------------------------------------------------ de día o de noche
      La ubicación se pide UNA vez y se guarda en los ajustes, junto con el
      hecho de haberla pedido: si la persona dice que no, se anota el respaldo
@@ -2024,6 +2101,7 @@
       case 'theme':
         store.saveSettings({ theme: arg('theme') }).then(function (s) { applyTheme(s.theme); render(); });
         break;
+      case 'toggle-push': togglePush(); break;
       case 'toggle-reminders':
         store.saveSettings({ reminders: !store.settings().reminders }).then(function () { render(); });
         break;

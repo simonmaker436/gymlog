@@ -195,6 +195,39 @@
       });
   }
 
+  /* ------------------------------------------------ suscripción push
+     La tabla push_subscriptions tiene RLS por auth.uid(): el cliente escribe
+     con su propia sesión y no hay forma de tocar la fila de otra cuenta,
+     aunque se mande otro user_id. Lo pone el servidor a partir del token. */
+  function savePushSubscription(subscriptionId) {
+    var c = sb();
+    if (!c) return Promise.reject(new Error('No hay conexión con la nube ahora mismo.'));
+    return session().then(function (s) {
+      if (!s) throw new Error('Iniciá sesión primero.');
+      return c.from('push_subscriptions').upsert({
+        user_id: s.user.id,
+        subscription_id: subscriptionId,
+        user_agent: (navigator.userAgent || '').slice(0, 200),
+        updated_at: new Date().toISOString()
+      });
+    }).then(function (r) {
+      if (r.error) throw new Error(friendlyError(r.error));
+      return true;
+    });
+  }
+
+  function deletePushSubscription() {
+    var c = sb();
+    if (!c) return Promise.resolve();
+    return session().then(function (s) {
+      if (!s) return null;
+      return c.from('push_subscriptions')['delete']().eq('user_id', s.user.id);
+    }).then(function (r) {
+      if (r && r.error) throw new Error(friendlyError(r.error));
+      return true;
+    });
+  }
+
   /* --------------------------------------------------------- unsplash
      La clave vive en la función. Un fallo acá NO es grave: la tarjeta para
      compartir sale igual con su fondo de siempre, así que el error se
@@ -308,6 +341,8 @@
     coach: coach,
     chat: chat,
     unsplash: unsplash,
+    savePushSubscription: savePushSubscription,
+    deletePushSubscription: deletePushSubscription,
     listPhotos: listPhotos,
     uploadPhoto: uploadPhoto,
     deletePhoto: deletePhoto,
