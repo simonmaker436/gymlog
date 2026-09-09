@@ -4,12 +4,24 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { GEMINI_MODEL, handle } from "./index.ts";
 
 const realFetch = globalThis.fetch;
+const USER = "11111111-2222-3333-4444-555555555555";
 
-function mockGemini(status: number, body: unknown) {
-  globalThis.fetch = ((..._a: unknown[]) =>
-    Promise.resolve(
+/* La función valida el token contra /auth/v1/user antes de tocar la IA, así
+   que el simulador tiene que enrutar por URL: la sesión por un lado y Gemini
+   por otro. `sinSesion` hace que el token no valga. */
+function mockGemini(status: number, body: unknown, opts: { sinSesion?: boolean } = {}) {
+  globalThis.fetch = ((u: unknown) => {
+    if (String(u).includes("/auth/v1/user")) {
+      return Promise.resolve(
+        opts.sinSesion
+          ? new Response("{}", { status: 401 })
+          : new Response(JSON.stringify({ id: USER }), { status: 200 }),
+      );
+    }
+    return Promise.resolve(
       new Response(typeof body === "string" ? body : JSON.stringify(body), { status }),
-    )) as typeof fetch;
+    );
+  }) as unknown as typeof fetch;
 }
 
 function geminiOk(recomendacion: string, consejo: string) {
@@ -20,10 +32,28 @@ function geminiOk(recomendacion: string, consejo: string) {
   };
 }
 
-function post(body: unknown) {
+/* Envuelve un simulador propio para que la validación de sesión siga
+   contestando: la función la consulta antes que nada, y si no, todas estas
+   pruebas se quedarían en el 401. */
+function conSesionOk(handler: (u: unknown, init?: RequestInit) => Promise<Response>) {
+  globalThis.fetch = ((u: unknown, init?: RequestInit) => {
+    if (String(u).includes("/auth/v1/user")) {
+      return Promise.resolve(new Response(JSON.stringify({ id: USER }), { status: 200 }));
+    }
+    return handler(u, init);
+  }) as unknown as typeof fetch;
+}
+
+/* Las llamadas que cuestan dinero, que son las que interesa contar. */
+const esIA = (u: unknown) =>
+  String(u).includes("generativelanguage") || String(u).includes("api.groq.com");
+
+function post(body: unknown, auth: string | null = "Bearer token-de-prueba") {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (auth) headers.Authorization = auth;
   return new Request("https://x/coach", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
 }
@@ -36,11 +66,71 @@ const SESIONES = [
 
 function conClave<T>(fn: () => Promise<T>): Promise<T> {
   Deno.env.set("GEMINI_API_KEY", "clave-de-prueba");
+  Deno.env.set("SUPABASE_URL", "https://sb.test");
+  Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "service-role-secreta");
   return fn().finally(() => {
     Deno.env.delete("GEMINI_API_KEY");
+    Deno.env.delete("SUPABASE_URL");
+    Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY");
     globalThis.fetch = realFetch;
   });
 }
+
+/* ------------------------------------------------------------ sesión
+   Los datos van en la petición, así que acá no hay nada de otra cuenta que
+   filtrar; lo que se protege es la cuota de IA del proyecto, que si no
+   podría gastar cualquiera con la clave pública. */
+
+Deno.test("sin token válido responde 401 y no llama a la IA", async () =>
+  await conClave(async () => {
+    const pedidas: string[] = [];
+    mockGemini(200, geminiOk("x", "y"), { sinSesion: true });
+    const base = globalThis.fetch;
+    globalThis.fetch = ((u: unknown, i?: RequestInit) => {
+      pedidas.push(String(u));
+      return (base as typeof fetch)(u as string, i);
+    }) as unknown as typeof fetch;
+
+    const res = await handle(post({ workouts: SESIONES }));
+    assertEquals(res.status, 401);
+    assertEquals((await res.json()).error, "Necesitás iniciar sesión.");
+    assertEquals(
+      pedidas.some((u) => u.includes("generativelanguage") || u.includes("groq")),
+      false,
+      "un anónimo no puede gastar la cuota de IA",
+    );
+  }));
+
+Deno.test("sin cabecera Authorization tampoco", async () =>
+  await conClave(async () => {
+    mockGemini(200, geminiOk("x", "y"));
+    const res = await handle(post({ workouts: SESIONES }, null));
+    assertEquals(res.status, 401);
+  }));
+
+/* El 401 llega antes que cualquier otra validación: si no, un anónimo
+   podría deducir cosas por el mensaje de error que recibe. */
+Deno.test("la sesión se comprueba antes que el cuerpo y las claves", async () => {
+  Deno.env.set("SUPABASE_URL", "https://sb.test");
+  Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "x");
+  Deno.env.delete("GEMINI_API_KEY");
+  Deno.env.delete("GROQ_API_KEY");
+  mockGemini(200, {}, { sinSesion: true });
+  try {
+    // sin claves de IA, con menos de 3 sesiones y sin JSON válido: igual 401
+    assertEquals((await handle(post({ workouts: [] }))).status, 401);
+    const roto = new Request("https://x/coach", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer x" },
+      body: "no es json",
+    });
+    assertEquals((await handle(roto)).status, 401);
+  } finally {
+    Deno.env.delete("SUPABASE_URL");
+    Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY");
+    globalThis.fetch = realFetch;
+  }
+});
 
 Deno.test("OPTIONS responde el preflight con CORS", async () => {
   const res = await handle(new Request("https://x/coach", { method: "OPTIONS" }));
@@ -55,27 +145,42 @@ Deno.test("GET no está permitido", async () => {
 
 Deno.test("sin GEMINI_API_KEY avisa en vez de reventar", async () => {
   Deno.env.delete("GEMINI_API_KEY");
-  const res = await handle(post({ workouts: SESIONES }));
-  assertEquals(res.status, 500);
-  assert((await res.json()).error.includes("GEMINI_API_KEY"));
+  Deno.env.delete("GROQ_API_KEY");
+  Deno.env.set("SUPABASE_URL", "https://sb.test");
+  Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "x");
+  conSesionOk(() => Promise.resolve(new Response("{}", { status: 200 })));
+  try {
+    const res = await handle(post({ workouts: SESIONES }));
+    assertEquals(res.status, 500);
+    assert((await res.json()).error.includes("GEMINI_API_KEY"));
+  } finally {
+    Deno.env.delete("SUPABASE_URL");
+    Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY");
+    globalThis.fetch = realFetch;
+  }
 });
 
 Deno.test("con menos de 3 sesiones no llama a la IA", async () =>
   await conClave(async () => {
-    let llamadas = 0;
-    globalThis.fetch = (() => {
-      llamadas++;
+    let llamadasIA = 0;
+    conSesionOk((u) => {
+      if (esIA(u)) llamadasIA++;
       return Promise.resolve(new Response("{}", { status: 200 }));
-    }) as typeof fetch;
+    });
 
     const res = await handle(post({ workouts: SESIONES.slice(0, 2) }));
     assertEquals(res.status, 400);
-    assertEquals(llamadas, 0, "no se gasta cuota con datos insuficientes");
+    assertEquals(llamadasIA, 0, "no se gasta cuota con datos insuficientes");
   }));
 
 Deno.test("cuerpo que no es JSON devuelve 400", async () =>
   await conClave(async () => {
-    const req = new Request("https://x/coach", { method: "POST", body: "{roto" });
+    conSesionOk(() => Promise.resolve(new Response("{}", { status: 200 })));
+    const req = new Request("https://x/coach", {
+      method: "POST",
+      headers: { "Authorization": "Bearer token-de-prueba" },
+      body: "{roto",
+    });
     assertEquals((await handle(req)).status, 400);
   }));
 
@@ -113,7 +218,8 @@ Deno.test("clave inválida se explica sin tecnicismos", async () =>
 
 Deno.test("si la red falla no se rompe", async () =>
   await conClave(async () => {
-    globalThis.fetch = (() => Promise.reject(new Error("sin red"))) as typeof fetch;
+    /* La sesión sí se valida; lo que se cae es la llamada a la IA. */
+    conSesionOk(() => Promise.reject(new Error("sin red")));
     const res = await handle(post({ workouts: SESIONES }));
     assertEquals(res.status, 502);
     assert((await res.json()).error.includes("No se pudo contactar"));
@@ -145,10 +251,10 @@ Deno.test("una respuesta cortada por falta de tokens se explica sola", async () 
 Deno.test("pide margen de sobra para que el modelo pueda razonar", async () =>
   await conClave(async () => {
     let enviado = "";
-    globalThis.fetch = ((_u: unknown, init: RequestInit) => {
-      enviado = String(init.body);
+    conSesionOk((_u, init) => {
+      enviado = String(init?.body);
       return Promise.resolve(new Response(JSON.stringify(geminiOk("a", "b")), { status: 200 }));
-    }) as unknown as typeof fetch;
+    });
 
     await handle(post({ workouts: SESIONES }));
     const tope = JSON.parse(enviado).generationConfig.maxOutputTokens;
@@ -170,10 +276,10 @@ Deno.test("respuesta ininteligible del modelo no rompe", async () =>
 Deno.test("apunta al modelo vigente, con la clave en la query y no en el cuerpo", async () =>
   await conClave(async () => {
     let url = "";
-    globalThis.fetch = ((u: unknown) => {
+    conSesionOk((u) => {
       url = String(u);
       return Promise.resolve(new Response(JSON.stringify(geminiOk("a", "b")), { status: 200 }));
-    }) as unknown as typeof fetch;
+    });
 
     await handle(post({ workouts: SESIONES }));
     assertEquals(GEMINI_MODEL, "gemini-3.6-flash");
@@ -187,10 +293,10 @@ Deno.test("apunta al modelo vigente, con la clave en la query y no en el cuerpo"
 Deno.test("el prompt que sale lleva los días reales", async () =>
   await conClave(async () => {
     let enviado = "";
-    globalThis.fetch = ((_u: unknown, init: RequestInit) => {
-      enviado = String(init.body);
+    conSesionOk((_u, init) => {
+      enviado = String(init?.body);
       return Promise.resolve(new Response(JSON.stringify(geminiOk("a", "b")), { status: 200 }));
-    }) as unknown as typeof fetch;
+    });
 
     await handle(post({ workouts: SESIONES, today: "2026-09-06" }));
     const cuerpo = JSON.parse(enviado);

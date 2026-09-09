@@ -11,10 +11,15 @@ const SESIONES = [
   { date: "2026-08-24", type: "pierna", energy: 4, feeling: 4, difficulty: 3, notes: "fundido" },
 ];
 
+const USER = "11111111-2222-3333-4444-555555555555";
+
 function post(body: unknown) {
   return new Request("https://x/coach", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer token-de-prueba",
+    },
     body: JSON.stringify(body),
   });
 }
@@ -35,6 +40,10 @@ function ruta(
   espia?: { gemini?: string; groq?: string; auth?: string | null },
 ) {
   globalThis.fetch = ((u: unknown, init: RequestInit) => {
+    /* La función valida la sesión antes de tocar la IA. */
+    if (String(u).includes("/auth/v1/user")) {
+      return Promise.resolve(new Response(JSON.stringify({ id: USER }), { status: 200 }));
+    }
     if (esGemini(u)) {
       if (espia) espia.gemini = String(init?.body ?? "");
       return Promise.resolve(gemini());
@@ -54,9 +63,13 @@ function conClaves<T>(fn: () => Promise<T>, opts?: { gemini?: boolean; groq?: bo
   const g = opts?.gemini ?? true, q = opts?.groq ?? true;
   if (g) Deno.env.set("GEMINI_API_KEY", "clave-gemini"); else Deno.env.delete("GEMINI_API_KEY");
   if (q) Deno.env.set("GROQ_API_KEY", "clave-groq"); else Deno.env.delete("GROQ_API_KEY");
+  Deno.env.set("SUPABASE_URL", "https://sb.test");
+  Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "service-role-secreta");
   return fn().finally(() => {
     Deno.env.delete("GEMINI_API_KEY");
     Deno.env.delete("GROQ_API_KEY");
+    Deno.env.delete("SUPABASE_URL");
+    Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY");
     globalThis.fetch = realFetch;
   });
 }
@@ -220,6 +233,8 @@ Deno.test("sin GEMINI_API_KEY se va derecho a Groq", async () =>
 
 Deno.test("sin ninguna de las dos claves lo dice claro", async () =>
   await conClaves(async () => {
+    /* Hace falta enrutar igual: la sesión se valida antes que las claves. */
+    ruta(() => new Response("{}", { status: 200 }), () => new Response("{}", { status: 200 }));
     const res = await handle(post({ workouts: SESIONES }));
     assertEquals(res.status, 500);
     const err = (await res.json()).error as string;

@@ -18,6 +18,7 @@ import {
   CORS,
   json,
 } from "../_shared/ai.ts";
+import { supabaseUrl, userIdFrom } from "../_shared/auth.ts";
 
 /* Se reexportan para que las pruebas de esta carpeta sigan importando desde
    un solo sitio. */
@@ -321,6 +322,16 @@ No repitas cifras que no estén en los datos de arriba.`;
 export async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Método no permitido." }, 405);
+
+  if (!supabaseUrl()) return json({ error: "La función no está bien configurada." }, 500);
+
+  /* Sin sesión no se contesta. Los datos vienen en la petición, así que acá
+     no hay nada de nadie que filtrar, pero sin esta comprobación cualquiera
+     con la clave pública del proyecto podría gastar la cuota de IA. Va lo
+     primero, antes de mirar el cuerpo o las claves: un anónimo no tiene que
+     llegar ni a rozar la IA. */
+  const userId = await userIdFrom(req);
+  if (!userId) return json({ error: "Necesitás iniciar sesión." }, 401);
 
   const keys = {
     gemini: Deno.env.get("GEMINI_API_KEY") ?? undefined,
