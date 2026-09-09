@@ -242,7 +242,7 @@
     return {
       id: null, date: c.today, went: true, duration: t.duration,
       energy: t.energy, feeling: t.feeling, difficulty: t.difficulty,
-      type: null, focus: emptyFocus(), light: null, weight: null, notes: ''
+      type: null, focus: emptyFocus(), time: null, light: null, weight: null, notes: ''
     };
   }
 
@@ -255,6 +255,7 @@
       energy: existing.energy || 4, feeling: existing.feeling || 4, difficulty: existing.difficulty || 3,
       type: existing.type || null,
       focus: focusFrom(existing),
+      time: existing.time || null,
       light: existing.light || null,
       weight: existing.weight, notes: existing.notes || ''
     } : Object.assign(blank(c), { date: date || c.today });
@@ -319,6 +320,12 @@
         '</div></div>' +
 
         '<div id="f-went"' + (f.went ? '' : ' class="hidden"') + ' style="display:flex;flex-direction:column;gap:16px">' +
+
+        '<div class="field"><label for="f-time">¿A qué hora entrenaste? ' +
+        '<span class="hint">opcional</span></label>' +
+        '<input class="input" type="time" id="f-time" value="' + esc(f.time || '') + '">' +
+        '<span class="hint">Solo si registrás esto más tarde. Sirve para saber si ' +
+        'entrenaste de día o de noche; si lo dejás vacío se usa la hora de ahora.</span></div>' +
 
         '<div class="field"><label for="f-h">Duración</label>' +
         '<div class="duration-row">' +
@@ -385,10 +392,14 @@
               energy: w.energy || 4, feeling: w.feeling || 4, difficulty: w.difficulty || 3,
               type: w.type || null,
               focus: focusFrom(w),
+              time: w.time || null,
               light: w.light || null,
               weight: w.weight, notes: w.notes || ''
             };
-          } else { f.id = null; f.date = date; f.type = null; f.light = null; f.focus = emptyFocus(); }
+          } else {
+            f.id = null; f.date = date;
+            f.type = null; f.time = null; f.light = null; f.focus = emptyFocus();
+          }
           $('.sheet-body').innerHTML = body();
           bind(); refreshExists();
         }
@@ -523,8 +534,9 @@
                opción y se conserva mientras no se marque nada nuevo. */
             type: f.type,
             focus: f.focus,
-            /* La etiqueta de día/noche se conserva al editar: la calculó el
-               momento del registro, no este formulario. */
+            time: $('#f-time') ? $('#f-time').value : f.time,
+            /* La etiqueta de día/noche se conserva al editar: la recalcula
+               etiquetarLuz() si hace falta, no este formulario. */
             light: f.light,
             weight: f.went && $('#f-w') ? $('#f-w').value : null,
             notes: $('#f-n').value
@@ -620,7 +632,7 @@
           store.saveWorkout({
             id: null, date: copy.date, went: copy.went, duration: copy.duration,
             energy: copy.energy, feeling: copy.feeling, difficulty: copy.difficulty,
-            type: copy.type, focus: copy.focus, light: copy.light,
+            type: copy.type, focus: copy.focus, time: copy.time, light: copy.light,
             weight: copy.weight, notes: copy.notes, demo: copy.demo
           }).then(function () { render(); U.toast('Recuperada', 'ok'); });
         }
@@ -1214,18 +1226,53 @@
     });
   }
 
-  /* Solo se etiqueta lo que se registra en el día: para una sesión que se
-     rellena tres días después, la hora del formulario es la de ahora y no la
-     del entrenamiento. Inventar una etiqueta ahí sería ensuciar los datos
-     con los que después se sacan conclusiones. */
+  /* Qué instante representa una sesión, o null si no se puede saber.
+
+     Con hora escrita a mano manda esa, y entonces da igual cuándo se
+     registre: se puede etiquetar una sesión de la semana pasada.
+
+     Sin hora se vuelve a la regla de siempre: solo el mismo día, con la hora
+     de ahora. Para una sesión que se rellena tres días después la hora del
+     dispositivo es la de ahora y no la del entrenamiento, y una etiqueta
+     inventada ensuciaría justo los datos con los que después se comparan las
+     medias de día contra noche. */
+  function instanteDe(rec) {
+    if (rec.time) {
+      /* Sin zona horaria: el navegador lo interpreta en la local, que es la
+         de quien entrenó. */
+      var t = new Date(rec.date + 'T' + rec.time + ':00');
+      return isNaN(t) ? null : t;
+    }
+    return rec.date === S.today() ? new Date() : null;
+  }
+
   function etiquetarLuz(rec) {
-    if (!rec || !rec.went || rec.light) return;
-    if (rec.date !== S.today()) return;
+    if (!rec || !rec.went) return;
+
+    var cuando = instanteDe(rec);
+
+    if (!cuando) {
+      /* Sin instante que valga. Si además la sesión arrastra una etiqueta,
+         solo pudo salir de una hora escrita que ahora se borró: sin la hora
+         ya no hay en qué apoyarla, así que se va con ella. Las etiquetas de
+         las sesiones del día no pasan por acá (esas sí tienen instante). */
+      if (rec.light) {
+        store.saveWorkout(Object.assign({}, rec, { light: null }))
+          .then(function () { render(); })
+          ['catch'](function () { });
+      }
+      return;
+    }
+
+    /* Con hora escrita se recalcula siempre: si se corrige de 8:00 a 21:00,
+       la etiqueta tiene que pasar de día a noche. Sin hora, una vez puesta no
+       se vuelve a tocar. */
+    if (rec.light && !rec.time) return;
 
     ensureGeo()
-      .then(function (g) { return GL.sun.classify(new Date(), g.lat, g.lng); })
+      .then(function (g) { return GL.sun.classify(cuando, g.lat, g.lng); })
       .then(function (luz) {
-        if (!luz) return;
+        if (!luz || luz === rec.light) return;   // nada que cambiar
         /* store, no rawStore: la etiqueta es un dato de la sesión y tiene
            que llegar a la nube. Si la API contesta rápido, la subida que ya
            estaba programada (1,5 s) se la lleva y no hay una segunda. */

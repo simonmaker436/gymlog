@@ -13,6 +13,14 @@
   var NONE = '<span class="none">sin datos</span>';
 
   /* El tipo de entreno es opcional: sin etiqueta se dice, no se inventa. */
+  /* «De noche · 21:30». La hora solo se muestra si la escribió la persona;
+     si no, la etiqueta sola ya dice lo que hay que saber. */
+  function lightText(w) {
+    var l = GL.store.lightLabel(w.light);
+    if (!l) return null;
+    return w.time ? l + ' · ' + w.time : l;
+  }
+
   /* Recibe la sesión entera, no una clave: la etiqueta puede venir de la
      selección nueva por músculos o de la etiqueta vieja de una sola opción. */
   function typeValue(w) {
@@ -347,7 +355,7 @@
             : '') +
           (w.light
             ? '<span class="pill light">' + icon(w.light === 'dia' ? 'sun' : 'moon') +
-              esc(GL.store.lightLabel(w.light)) + '</span>'
+              esc(lightText(w)) + '</span>'
             : '')
         : '') +
       (w.went
@@ -657,7 +665,7 @@
             : '') +
           (w.light
             ? '<p class="musclist">' + icon(w.light === 'dia' ? 'sun' : 'moon') + ' ' +
-              esc(GL.store.lightLabel(w.light)) + '</p>'
+              esc(lightText(w)) + '</p>'
             : '') +
           (w.notes ? '<p style="margin:14px 0 0;font-size:14px;color:var(--text-dim);border-left:1px solid var(--border-strong);padding-left:11px">' + esc(w.notes) + '</p>' : '')
           : '<p class="muted" style="margin:0 0 14px;font-size:14px">' +

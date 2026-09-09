@@ -353,6 +353,18 @@
 
   /* Opcional a propósito: null es un valor válido y significa «sin etiqueta».
      Cualquier cosa que no esté en la lista se descarta. */
+  /* Hora del entrenamiento, 'HH:MM', o null. Es opcional: sirve para poder
+     etiquetar día/noche cuando la sesión se registra más tarde y la hora del
+     dispositivo ya no es la del entrenamiento. */
+  function normalizeTime(v) {
+    if (typeof v !== 'string') return null;
+    var m = v.trim().match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return null;
+    var h = Number(m[1]), min = Number(m[2]);
+    if (!(h >= 0 && h <= 23 && min >= 0 && min <= 59)) return null;
+    return (h < 10 ? '0' : '') + h + ':' + (min < 10 ? '0' : '') + min;
+  }
+
   /* 'dia' | 'noche' | null. Lo calcula sun.js contra el amanecer y el ocaso
      del día en que se entrenó; null significa «no se pudo saber», que es un
      valor válido y no rompe nada. */
@@ -657,6 +669,7 @@
         // sin ir al gimnasio no hay tipo de entreno que valga
         type: data.went ? normalizeType(data.type) : null,
         focus: data.went ? normalizeFocus(data.focus) : null,
+        time: data.went ? normalizeTime(data.time) : null,
         light: data.went ? normalizeLight(data.light) : null,
         weight: (data.weight === '' || data.weight === null || data.weight === undefined || isNaN(Number(data.weight)))
           ? null : Number(data.weight),
@@ -875,6 +888,7 @@
                vieja de una sola opción; `focus`, la selección por músculos. */
             type: normalizeType(w.type),
             focus: normalizeFocus(w.focus),
+            time: normalizeTime(w.time),
             light: normalizeLight(w.light),
             weight: (w.weight == null || isNaN(Number(w.weight))) ? null : Number(w.weight),
             notes: (w.notes || '').toString(),
