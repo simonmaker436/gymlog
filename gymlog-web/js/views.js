@@ -86,10 +86,10 @@
       '<b>Hoy toca gimnasio</b>' +
       '<small>Son las ' + String(ctx.hour).padStart(2, '0') + ':00 y todavía no registraste nada.</small>' +
       '</div>' +
-      '<div class="remind-b">' +
+      /* Un solo botón: «No pude ir» vive en el bloque de acción de arriba,
+         que se ve a cualquier hora. Repetirlo acá daría dos botones iguales
+         en la misma pantalla a partir de las 17:00. */
       '<button class="btn sm primary" data-act="log" data-date="' + ctx.today + '">Registrar</button>' +
-      '<button class="btn sm ghost" data-act="excuse" data-date="' + ctx.today + '">No pude ir</button>' +
-      '</div>' +
       '</div>';
   }
 
@@ -247,6 +247,22 @@
     /* ---- acción */
     html += '<button class="btn primary block" data-act="log" data-date="' + ctx.today + '">' +
       icon(todayRec ? 'edit' : 'plus') + (todayRec ? 'Editar lo de hoy' : 'Registrar sesión') + '</button>';
+
+    /* Faltar también es una acción del día, y tiene que estar acá: este es el
+       bloque que se ve siempre. Antes vivía solo dentro de reminderBanner(),
+       que no aparece hasta la hora del recordatorio (17:00 de fábrica), así
+       que la mayor parte del día no había forma de llegar al motivo.
+
+       Con un registro de «no fui» ya hecho desde el formulario, el botón
+       sirve para ponerle motivo: si no, esa falta se queda sin clasificar y
+       rompe la racha sin que nadie haya preguntado nada. */
+    if (isGymDay && !todayRec) {
+      html += '<button class="btn ghost block" data-act="excuse" data-date="' + ctx.today + '">' +
+        icon('note') + 'No pude ir</button>';
+    } else if (todayRec && !todayRec.went) {
+      html += '<button class="btn ghost block" data-act="excuse" data-date="' + ctx.today + '">' +
+        icon('note') + (todayRec.excuse ? 'Cambiar el motivo' : 'Anotar el motivo') + '</button>';
+    }
 
     if (!todayRec && S.done(ctx.workouts).length >= 3) {
       var typ = S.typicalWorkout(ctx.workouts);
